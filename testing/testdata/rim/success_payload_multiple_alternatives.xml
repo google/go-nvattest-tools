@@ -1,0 +1,6 @@
+<SoftwareIdentity xmlns="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" xmlns:ns0="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" xmlns:ns2="http://www.w3.org/2001/04/xmlenc#sha384" corpus="false" name="GH100" patch="false" supplemental="false" tagId="someid" version="1.0" tagVersion="0">
+    <ns0:Payload xmlns:SHA384="http://www.w3.org/2001/04/xmlenc#sha384">
+        <ns0:Resource type="Measurement" index="0" active="True" alternatives="1" ns2:Hash0="000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" name="Measurement_0" size="48"/>
+        <ns0:Resource type="Measurement" index="12" active="True" alternatives="4" ns2:Hash0="000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" ns2:Hash1="758af96044c700f98a85347be27124d51c05b8784ba216b629b9aaab6d538c759aed9922a133e4ac473564d359b271d5" ns2:Hash2="7df046f26d0536f3a0b06d288ce6e5c659cad7a9c45cbd3a82c5df248755e4ddeff5871045acc6366ccab178b0d6568e" ns2:Hash3="cb09606fa5c052f0bc4cfa86dbeb4e3e70500bfbeeb7193256ac24ed4464a607366df16a3547b7c17ebd741eb43f1adf" name="Measurement_12" size="48"/>
+    </ns0:Payload>
+</SoftwareIdentity>

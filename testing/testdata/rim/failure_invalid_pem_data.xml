@@ -1,0 +1,11 @@
+<SoftwareIdentity>
+  <Meta colloquialVersion="1.0" />
+  <Signature>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>--- NOT A VALID CERTIFICATE ---</X509Certificate>
+        <X509Certificate>--- NOT A VALID ROOT CERTIFICATE ---</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</SoftwareIdentity>

@@ -1,0 +1,10 @@
+<SoftwareIdentity>
+  <Meta colloquialVersion="1.0" />
+  <Signature>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>invalid base64</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</SoftwareIdentity>

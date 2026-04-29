@@ -1,0 +1,5 @@
+<SoftwareIdentity xmlns="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" xmlns:ns0="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" xmlns:ns2="http://www.w3.org/2001/04/xmlenc#sha384" corpus="false" name="GH100" patch="false" supplemental="false" tagId="someid" version="1.0" tagVersion="0">
+    <ns0:Payload xmlns:SHA384="http://www.w3.org/2001/04/xmlenc#sha384">
+        <ns0:Resource type="Measurement" index="0" active="True" alternatives="xyz" ns2:Hash0="hash0" name="Meas_0" size="10"/>
+    </ns0:Payload>
+</SoftwareIdentity>

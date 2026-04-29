@@ -1,0 +1,3 @@
+<SoftwareIdentity xmlns="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" xmlns:ns0="http://standards.iso.org/iso/19770/-2/2015/schema.xsd" corpus="false" name="GH100" patch="false" supplemental="false" tagId="someid" version="1.0" tagVersion="0">
+    <ns0:Payload></ns0:Payload>
+</SoftwareIdentity>

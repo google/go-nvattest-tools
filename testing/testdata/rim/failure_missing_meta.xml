@@ -1,0 +1,9 @@
+<ReferenceIntegrityManifest>
+  <Signature>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>somecert</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</ReferenceIntegrityManifest>

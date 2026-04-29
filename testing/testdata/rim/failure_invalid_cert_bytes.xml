@@ -1,0 +1,11 @@
+<ReferenceIntegrityManifest>
+  <Meta colloquialVersion="1.0" />
+  <Signature>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>aW52YWxpZCBjZXJ0aWZpY2F0ZSBieXRlcw==</X509Certificate>
+        <X509Certificate>BW52YxxpZCBjZXJAaWZpY2F0rSBieXRlcw==</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</ReferenceIntegrityManifest>

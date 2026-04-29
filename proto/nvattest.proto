@@ -1,0 +1,440 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+// Package nvattest represents Nvidia GPU and Switch attestation quotes.
+package nvattest;
+
+option go_package = "github.com/google/go-nvattest-tools/proto/nvattest";
+
+// The GPU Attestation Quote which contains a list of GPU information for each
+// GPU device.
+message GpuAttestationQuote {
+  // A list of GPU information for each GPU device.
+  repeated GpuInfo gpu_infos = 1;
+}
+
+// The GPU information for each GPU device.
+message GpuInfo {
+  // The UUID of the GPU device.
+  string uuid = 1;
+  // The driver version of the GPU.
+  string driver_version = 2;
+  // The VBIOS version of the GPU.
+  string vbios_version = 3;
+  // The GPU architecture.
+  GpuArchitectureType gpu_architecture = 4;
+  // The raw attestation certificate chain for the GPU device.
+  bytes attestation_certificate_chain = 5;
+  // The raw attestation report for the GPU device.
+  bytes attestation_report = 6;
+}
+
+// The Switch Attestation Quote which contains a list of Switch information for
+// each Switch device.
+message SwitchAttestationQuote {
+  // A list of Switch information for each Switch device.
+  repeated SwitchInfo switch_infos = 1;
+}
+
+// The Switch information for each Switch device.
+message SwitchInfo {
+  // The UUID of the Switch device.
+  string uuid = 1;
+  // The raw attestation certificate chain for the Switch device.
+  bytes attestation_certificate_chain = 2;
+  // The raw attestation report for the Switch device.
+  bytes attestation_report = 3;
+}
+
+// Keeping the attestation report in sync with Nvidia's Attestation SDK. This is
+// extracted and parsed from the raw attestation report data.
+message AttestationReport {
+  // The SPDM measurement request body.
+  SpdmMeasurementRequest spdm_measurement_request = 1;
+  // The SPDM measurement response body.
+  SpdmMeasurementResponse spdm_measurement_response = 2;
+}
+
+// SPDM facilitates device attestation, measurement collection, and trust
+// establishment between devices and the platform. Specs are defined in Table 23
+// -
+// https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.0.0.pdf
+message SpdmMeasurementRequest {
+  // The version of the SPDM Specification. E.g. V1.0 = 0x10.
+  bytes spdm_version = 1;
+  // The request message code or response code. 0x00 through 0x7F represent
+  // response codes and 0x80 through 0xFF represent request codes. E.g. 0xE0 =
+  // GET_MEASUREMENTS
+  bytes request_response_code = 2;
+  // Determines whether the Responder shall generate the signature in the
+  // corresponding response. The Nonce field shall be present in the request for
+  // this capability.
+  bytes param1 = 3;
+  // Define measurement operation -
+  // 0x0: query total number of measurements.
+  // 0xFF: request all measurements.
+  // 0x01-0xFE: request measurement at the corresponding index.
+  bytes param2 = 4;
+  // The Requester should choose a random 32 bytes value.
+  bytes nonce = 5;
+  // The slot id parameter.
+  bytes slot_id_param = 6;
+}
+
+// SPDM facilitates device attestation, measurement collection, and trust
+// establishment between devices and the platform. Specs are defined in Table 24
+// -
+// https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.0.0.pdf
+message SpdmMeasurementResponse {
+  // The version of the SPDM Specification. E.g. V1.0 = 0x10.
+  bytes spdm_version = 1;
+  // The request message code or response code. 0x00 through 0x7F represent
+  // response codes and 0x80 through 0xFF represent request codes. E.g. 0x60 =
+  // MEASUREMENTS
+  bytes request_response_code = 2;
+  // The first one-byte parameter. The contents of the parameter is specific to
+  // the Request Response Code. When Param2 in the requested measurement
+  // operation is 0 , this parameter shall return the total number of
+  // measurement indices on the device. Otherwise, this field is reserved.
+  bytes param1 = 3;
+  // The second one-byte parameter. The contents of the parameter is specific to
+  // the Request Response Code.
+  bytes param2 = 4;
+  // Number of measurement blocks (N) in MeasurementRecord. This field shall
+  // reflect the number of measurement blocks in MeasurementRecord. If Param2 in
+  // the requested measurement operation is 0 , this field shall be 0 .
+  int32 number_of_blocks = 5;
+  // Size of the MeasurementRecord field in bytes. If Param2 in the requested
+  // measurement operation is 0 , this field shall be 0 .
+  int32 measurement_record_length = 6;
+  // Concatenation of all Measurement Blocks that correspond to the requested
+  // Measurement operation. The Measurement Block structure is defined in
+  // Measurement block.
+  MeasurementRecord measurement_record = 7;
+  // The Responder should choose a random 32 bytes value.
+  bytes nonce = 8;
+  // Size of the OpaqueData field in bytes. The value shall not be greater than
+  // 1024 bytes.
+  int32 opaque_length = 9;
+  // Free-form field, if present. The Responder may include Responder specific
+  // information and/or information defined by its transport.
+  OpaqueData opaque_data = 10;
+  // Signature of the GET_MEASUREMENTS Request and MEASUREMENTS Response
+  // messages, excluding the Signature field and signed using the device private
+  // key (slot 0 leaf certificate private key). The Responder shall use the
+  // asymmetric signing algorithm it selected during the last ALGORITHMS
+  // response message to the Requester and S is the size of that asymmetric
+  // signing algorithm output.
+  bytes signature = 11;
+}
+
+// MeasurementRecord contains a list of measurement blocks.
+message MeasurementRecord {
+  // A list of measurement blocks.
+  repeated MeasurementBlock measurement_blocks = 1;
+}
+
+// MeasurementBlock contains the index, specification and dmtf measurement.
+message MeasurementBlock {
+  // This field shall represent the index of the measurement.
+  int32 index = 1;
+  // This field is a bitmask. The value shall indicate the measurement
+  // specification that the requested Measurement follows and shall match the
+  // selected measurement specification in Algorithms message.
+  // Only one bit shall be set in the Measurement Block. Bit 0 = DMTF.
+  // All other bits are reserved.
+  int32 specification = 2;
+  // The DMTF measurement.
+  DmtfMeasurement dmtf_measurement = 3;
+}
+
+// DMTF Measurements include the type of value (e.g., hash of NIC/PSC/ARM
+// firmware, security configs) and the value size, which describes the hash
+// (e.g., SHA2-512 hash). The RIM measurements are part of the value field.
+message DmtfMeasurement {
+  /*
+  This field is composed of two parts: bit [7] indicating the
+  representation in DMTFSpecMeasurementValue , and bits [6:0]
+  indicating what is being measured by DMTFSpecMeasurementValue .
+  These values are set independently. These values are interpreted as
+  follows:
+  • [7] = 0b: Hash
+  • [7] = 1b : Raw Bit Stream
+  • [6:0] = 00h: immutable ROM
+  • [6:0] = 01h: mutable firmware
+  • [6:0] = 02h: hardware configuration, such as straps, debug
+  modes
+  • [6:0] = 03h : firmware configuration, e.g., configurable
+  firmware policy
+  All other values reserved.
+  */
+  bytes value_type = 1;
+  // This field indicates the size of DMTFSpecMeasurementValue in bytes.
+  int32 value_size = 2;
+  // This field contains the bytes of cryptographic hash or Raw Bit Stream,
+  // as indicated in DMTFSpecMeasurementType[7] .
+  bytes value = 3;
+}
+
+// Opaque Data refers to data structures or interfaces where the internal
+// implementation or data layout is hidden from the user. It primarily includes
+// information such as driver/vbios version, gpu info, board id, project sku,
+// certificate related information etc.
+message OpaqueData {
+  // A list of opaque field data.
+  repeated OpaqueFieldData opaque_field_data = 1;
+}
+
+// OpaqueFieldData contains the data type and the value of the opaque field.
+message OpaqueFieldData {
+  // The data type of the opaque field.
+  OpaqueDataType data_type = 1;
+  // The value of the opaque field.
+  oneof data {
+    MsrCounts msr_counts = 2;
+    SwitchPdis switch_pdis = 3;
+    FloorsweptPorts floorswept_ports = 4;
+    SwitchTopology switch_topology = 5;
+    bytes value = 6;
+  }
+}
+
+// MsrCounts contains a list of measurement count values from the OpaqueData
+// fields.
+message MsrCounts {
+  // A list of MSR counts.
+  repeated int32 values = 1;
+}
+
+// SwitchPdis contains a list of Switch PDI values.
+message SwitchPdis {
+  // A list of Switch PDI values.
+  repeated bytes values = 1;
+}
+
+// FloorsweptPorts contains a list of Floorswept Ports.
+message FloorsweptPorts {
+  // A list of Floorswept Ports.
+  repeated int32 values = 1;
+}
+
+// SwitchTopology contains the Switch GPU PDI values and the Switch Port values.
+message SwitchTopology {
+  // SwitchGpuPdis contains a list of Switch GPU PDI values. It represents the
+  // list of GPUs seen by a switch.
+  repeated bytes switch_gpu_pdis = 1;
+
+  // SwitchPorts contains a list of Switch Port values.
+  repeated bytes switch_ports = 2;
+}
+
+// SwitchReportedGpuPdis contains a list of GPU PDI values as seen from a
+// switch.
+message SwitchReportedGpuPdis {
+  // A list of GPU PDI values.
+  repeated bytes values = 1;
+}
+
+// OpaqueDataType represents the different types of opaque data that can be
+// included in the attestation report.
+enum OpaqueDataType {
+  OPAQUE_FIELD_ID_UNSPECIFIED = 0;
+  OPAQUE_FIELD_ID_CERT_ISSUER_NAME = 1;
+  OPAQUE_FIELD_ID_CERT_AUTHORITY_KEY_IDENTIFIER = 2;
+  OPAQUE_FIELD_ID_DRIVER_VERSION = 3;
+  OPAQUE_FIELD_ID_GPU_INFO = 4;
+  OPAQUE_FIELD_ID_SKU = 5;
+  OPAQUE_FIELD_ID_VBIOS_VERSION = 6;
+  OPAQUE_FIELD_ID_MANUFACTURER_ID = 7;
+  OPAQUE_FIELD_ID_TAMPER_DETECTION = 8;
+  OPAQUE_FIELD_ID_SMC = 9;
+  OPAQUE_FIELD_ID_VPR = 10;
+  OPAQUE_FIELD_ID_NVDEC0_STATUS = 11;
+  OPAQUE_FIELD_ID_MSRSCNT = 12;
+  OPAQUE_FIELD_ID_CPRINFO = 13;
+  OPAQUE_FIELD_ID_BOARD_ID = 14;
+  OPAQUE_FIELD_ID_CHIP_SKU = 15;
+  OPAQUE_FIELD_ID_CHIP_SKU_MOD = 16;
+  OPAQUE_FIELD_ID_PROJECT = 17;
+  OPAQUE_FIELD_ID_PROJECT_SKU = 18;
+  OPAQUE_FIELD_ID_PROJECT_SKU_MOD = 19;
+  OPAQUE_FIELD_ID_FWID = 20;
+  OPAQUE_FIELD_ID_PROTECTED_PCIE_STATUS = 21;
+  OPAQUE_FIELD_ID_SWITCH_PDI = 22;
+  OPAQUE_FIELD_ID_FLOORSWEPT_PORTS = 23;
+  OPAQUE_FIELD_ID_POSITION_ID = 24;
+  OPAQUE_FIELD_ID_LOCK_SWITCH_STATUS = 25;
+  OPAQUE_FIELD_ID_GPU_LINK_CONN = 26;
+  OPAQUE_FIELD_ID_SYS_ENABLE_STATUS = 27;
+  OPAQUE_FIELD_ID_OPAQUE_DATA_VERSION = 28;
+  OPAQUE_FIELD_ID_DEVICE_PDI = 29;
+  OPAQUE_FIELD_ID_DISABLED_PORTS = 30;
+  OPAQUE_FIELD_ID_SWITCH_POSITION_ID = 31;
+  OPAQUE_FIELD_ID_SWITCH_LOCK_STATUS = 32;
+  OPAQUE_FIELD_ID_SWITCH_GPU_PDIS = 33;
+  OPAQUE_FIELD_ID_CHIP_INFO = 34;
+  OPAQUE_FIELD_ID_FEATURE_FLAG = 35;
+  OPAQUE_FIELD_ID_INVALID = 255;
+}
+
+// GpuArchitectureType represents the different types of GPU architectures.
+enum GpuArchitectureType {
+  GPU_ARCHITECTURE_UNSPECIFIED = 0;
+  GPU_ARCHITECTURE_KEPLER = 1;
+  GPU_ARCHITECTURE_MAXWELL = 2;
+  GPU_ARCHITECTURE_PASCAL = 3;
+  GPU_ARCHITECTURE_VOLTA = 4;
+  GPU_ARCHITECTURE_TURING = 5;
+  GPU_ARCHITECTURE_AMPERE = 6;
+  GPU_ARCHITECTURE_ADA = 7;
+  GPU_ARCHITECTURE_HOPPER = 8;
+  GPU_ARCHITECTURE_UNKNOWN = 9;
+  GPU_ARCHITECTURE_BLACKWELL = 10;
+}
+
+// OcspState holds common results for a certificate chain
+// verification process. This message encapsulates the outcome of validating a
+// chain of digital certificates,
+message OcspState {
+  // OCSP status for the certificate.
+  OcspStatus ocsp_status = 1;
+
+  // Reason for revocation if ocsp_status is "revoked".
+  string ocsp_revocation_reason = 2;
+}
+
+// OcspStatus represents the possible statuses of an OCSP response.
+//
+// The distinction between UNSPECIFIED and UNKNOWN is critical:
+//  - UNSPECIFIED is the default state, meaning a definitive OCSP status could
+//    not be determined. This is typically due to a failure in the verification
+//    process itself (e.g., network error, invalid OCSP responder certificate).
+//  - UNKNOWN is a specific status returned by a compliant OCSP responder,
+//    indicating it was successfully queried but does not know the status of the
+//    certificate in question.
+// reference :
+// https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L298
+enum OcspStatus {
+  OCSP_STATUS_UNSPECIFIED = 0;
+  OCSP_STATUS_GOOD = 1;
+  OCSP_STATUS_REVOKED = 2;
+  OCSP_STATUS_UNKNOWN = 3;
+}
+
+// RimState holds common results for the verification of a RIM
+// (Reference Integrity Manifest). A RIM file contains expected measurements
+// (e.g., hashes) for firmware components like drivers or VBIOS.
+message RimState {
+  // True if the RIM file's structure conforms to its schema.
+  bool schema_validated = 1;
+
+  // True if the version in the RIM matches an expected/reported version.
+  bool version_matched = 2;
+
+  // True if the RIM file's digital signature is valid.
+  bool signature_verified = 3;
+
+  // Verification details for the certificate chain signing this RIM.
+  OcspState cert_chain_ocsp = 4;
+}
+
+// GpuInfoState details the outcome of all GPU verification checks for a single
+// GpuDevice. This message aggregates various verification results related to a
+// specific GPU's attestation. Python sdk reference claims:
+// https://github.com/NVIDIA/nvtrust/blob/d0d6536e8e52c53f5302d15db6074ff66d36adeb/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/utils/claims_utils.py#L54
+message GpuInfoState {
+  // Unique identifier (UUID) of the GPU device.
+  string gpu_uuid = 1;
+
+  // Driver version obtained from the GPU's attestation report.
+  string driver_version = 2;
+
+  // VBIOS version obtained from the GPU's attestation report.
+  string vbios_version = 3;
+
+  // Verification details for the attestation report's signing certificate
+  // chain.
+  OcspState cert_chain_ocsp = 4;
+
+  // True if the nonce in the attestation report matches the nonce sent in the
+  // request.
+  bool nonce_match = 5;
+
+  // True if the attestation report's digital signature is valid.
+  bool signature_verified = 6;
+
+  // Verification results for the GPU's driver RIM file.
+  RimState driver_rim = 7;
+
+  // Verification results for the GPU's VBIOS RIM file.
+  RimState vbios_rim = 8;
+
+  // True if reported measurements match expected measurements (e.g., from
+  // RIMs).
+  bool measurements_matched = 9;
+
+  // The verified attestation certificate chain for the GPU device.
+  bytes attestation_certificate_chain = 10;
+}
+
+// SwitchInfoState details the outcome of all Switch verification checks for a
+// single SwitchInfo. This message aggregates verification results for an NVIDIA
+// NVSwitch device. Python sdk reference claims:
+// https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/attestation_sdk/src/nv_attestation_sdk/verifiers/nv_switch_verifier/utils/claims_utils.py#L45
+message SwitchInfoState {
+  // Unique identifier (UUID) of the NVSwitch device.
+  string switch_uuid = 1;
+
+  // BIOS (or firmware) version from the Switch's attestation report.
+  string bios_version = 2;
+
+  // Verification details for the Switch attestation report's signing
+  // certificate chain.
+  OcspState cert_chain_ocsp = 3;
+
+  // True if the nonce in the Switch attestation report matches the requested
+  // nonce.
+  bool nonce_match = 4;
+
+  // True if the Switch attestation report's digital signature is valid.
+  bool signature_verified = 5;
+
+  // Verification results for the Switch's BIOS (or firmware) RIM file.
+  RimState bios_rim = 6;
+
+  // True if reported Switch measurements match expected measurements (e.g.,
+  // from its RIM).
+  bool measurements_matched = 7;
+
+  // The verified attestation certificate chain for the Switch device.
+  bytes attestation_certificate_chain = 8;
+}
+
+// GpuQuoteState details the outcome of all GPU verification checks
+// for a list of GpuDevices. This message aggregates various verification
+// results related to a list of GPU devices.
+message GpuQuoteState {
+  // List of GPU verification results for each GPU device.
+  repeated GpuInfoState gpu_info_states = 1;
+}
+
+// SwitchQuoteState details the outcome of all Switch verification checks
+// for a list of SwitchInfos. This message aggregates various verification
+// results related to a list of Switch devices.
+message SwitchQuoteState {
+  // List of Switch verification results for each Switch device.
+  repeated SwitchInfoState switch_info_states = 1;
+}
