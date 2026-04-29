@@ -22,3 +22,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/russellhaering/goxmldsig => github.com/atulpatildbz/goxmldsig v0.0.0-20260325075722-e806be5e3c3a
