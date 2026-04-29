@@ -150,29 +150,22 @@ topology validation.
 
 **Client-side:**
 
--   ```ppcieclient.Precheck(ctx context.Context,
-                            opts *ppcieclient.Options) error```
-    : Performs system-level pre-checks to ensure devices are in the correct mode
+-   `ppcieclient.Precheck(ctx context.Context,
+                            opts *ppcieclient.Options) error`: Performs system-level pre-checks to ensure devices are in the correct mode
     for PPCIE attestation.
--   ```ppcieclient.NewAttestation().CollectAllDeviceQuotes(ctx context.Context,
-                    opts ppcieclient.CollectOpts) (*pb.GpuAttestationQuote,
-                                                   *pb.SwitchAttestationQuote,
-                                                   error)```
-    : Collects quotes from all GPU and NVSwitch devices.
+-   `ppcieclient.NewAttestation().CollectAllDeviceQuotes(ctx context.Context, opts ppcieclient.CollectOpts) (*pb.GpuAttestationQuote, *pb.SwitchAttestationQuote, error)`: Collects quotes from all GPU and NVSwitch devices.
 
 **Server-side:**
 
--  ```ppcieserver.VerifySystemQuotes(ctx context.Context,
+-  `ppcieserver.VerifySystemQuotes(ctx context.Context,
                                     gpuQuote *pb.GpuAttestationQuote,
                                     switchQuote *pb.SwitchAttestationQuote,
                                     opts ppcieserver.Options) (*pb.GpuQuoteState,
-                                    *pb.SwitchQuoteState, error)```
-    : Verifies GPU and NVSwitch quotes.
--   ```ppcieserver.ValidateSystemTopology(ctx context.Context,
+                                    *pb.SwitchQuoteState, error)`: Verifies GPU and NVSwitch quotes.
+-   `ppcieserver.ValidateSystemTopology(ctx context.Context,
                               gpuAttestationReports []*pb.AttestationReport,
                               switchAttestationReports []*pb.AttestationReport,
-                              opts *ppcieserver.Options) error```
-    : Validates topology based on information in attestation reports.
+                              opts *ppcieserver.Options) error`: Validates topology based on information in attestation reports.
 
 **Example:**
 
