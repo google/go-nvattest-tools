@@ -1,0 +1,46 @@
+edition = "2024";
+
+package nvocsp_proto;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/google/go-nvattest-tools/proto/nvocsp";
+
+enum CertificateLevel {
+  CERTIFICATE_LEVEL_UNSPECIFIED = 0;
+  CERTIFICATE_LEVEL_L1 = 1;
+  CERTIFICATE_LEVEL_L2 = 2;
+  CERTIFICATE_LEVEL_L3 = 3;
+  CERTIFICATE_LEVEL_L4 = 4;
+}
+
+message OCSPResponses {
+  message CertStatusInfo {
+    // DER encoded OCSP response.
+    bytes raw_ocsp_response_bytes = 1;
+    string issuer_cert_serial_number = 2;
+    CertificateLevel cert_index = 3;
+  }
+
+  // This map contains the Nvidia OCSP data. The key is the certificate's serial
+  // number concatenated with its issuer's Distinguished Name (DN), that is,
+  // {serial_number}:{issuer_dn} and the value is OCSP certificate information.
+  map<string, CertStatusInfo> cert_status_info = 1;
+  google.protobuf.Timestamp last_updated = 2;
+}
+
+// DeviceL4RevokedCerts contains a list of Nvidia device L4 certificates that
+// are revoked.
+message DeviceL4RevokedCerts {
+  message CertInfo {
+    // The certificate's serial number.
+    string cert_serial_number = 1;
+
+    // The issuer's distinguished name (DN).
+    string issuer_dn = 2;
+  }
+
+  repeated CertInfo crl = 1;
+
+  google.protobuf.Timestamp last_updated = 2;
+}

@@ -47,3 +47,5 @@
 package proto
 
 //go:generate protoc -I$PROTOC_INSTALL_DIR/include -I=. --go_out=. --go_opt=module=github.com/google/go-nvattest-tools/proto nvattest.proto
+//go:generate protoc -I$PROTOC_INSTALL_DIR/include -I=. --go_out=. --go_opt=module=github.com/google/go-nvattest-tools/proto nvrim.proto
+//go:generate protoc -I$PROTOC_INSTALL_DIR/include -I=. --go_out=. --go_opt=module=github.com/google/go-nvattest-tools/proto nvocsp.proto

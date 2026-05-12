@@ -1,0 +1,14 @@
+edition = "2024";
+
+package nvrim_proto;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/google/go-nvattest-tools/proto/nvrim";
+
+message NvidiaRims {
+  // This map contains the Nvidia RIMs data. The key is the Nvidia Rims ID and
+  // the value is the base64-encoded Nvidia RIMs content.
+  map<string, string> rims_data = 1;
+  google.protobuf.Timestamp last_updated = 2;
+}
