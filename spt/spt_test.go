@@ -145,7 +145,12 @@ func TestVerifyGpuQuoteWithActualData(t *testing.T) {
 					td.ParsedRimOcspResponseCertL2.SerialNumber.String():       td.ParsedRimOcspResponseCertL2,
 				},
 			},
-			Now:       &verify.TimeSet{DeviceOCSPCertChain: validOcspTime, RIMCertChain: validOcspTime},
+			Now: &verify.TimeSet{
+				GPUCertChain:        validOcspTime,
+				RIMCertChain:        validOcspTime,
+				RIMOCSPCertChain:    validOcspTime,
+				DeviceOCSPCertChain: validOcspTime,
+			},
 			RimClient: rimClient,
 		},
 		Validation: validate.Options{

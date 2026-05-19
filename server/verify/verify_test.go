@@ -870,7 +870,12 @@ func TestRIMState(t *testing.T) {
 				tc.setup(t)
 			}
 			tempDir := t.TempDir()
-			opts := Options{rimSchemaPath: filepath.Join(tempDir, "schema.xsd"), Now: &TimeSet{RIMCertChain: currentTime}}
+			opts := Options{rimSchemaPath: filepath.Join(tempDir, "schema.xsd"), Now: &TimeSet{
+				GPUCertChain:        currentTime,
+				RIMCertChain:        currentTime,
+				RIMOCSPCertChain:    currentTime,
+				DeviceOCSPCertChain: currentTime,
+			}}
 			if err := os.WriteFile(opts.rimSchemaPath, []byte("<schema/>"), 0644); err != nil {
 				t.Fatalf("Failed to write schema file: %v", err)
 			}
