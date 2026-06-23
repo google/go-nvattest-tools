@@ -6,6 +6,7 @@ require (
 	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/beevik/etree v1.6.0
 	github.com/google/go-cmp v0.7.0
+	github.com/google/subcommands v1.2.0
 	github.com/lestrrat-go/libxml2 v0.0.0-20260304224138-bb3877930cf7
 	github.com/pkg/errors v0.9.1
 	github.com/russellhaering/goxmldsig v1.6.0
