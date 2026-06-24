@@ -25,3 +25,5 @@ require (
 )
 
 replace github.com/russellhaering/goxmldsig => github.com/atulpatildbz/goxmldsig v0.0.0-20260325075722-e806be5e3c3a
+
+replace github.com/lestrrat-go/libxml2 => github.com/atulpatildbz/libxml2 v0.0.0-20260624132807-d06374c0f56f
