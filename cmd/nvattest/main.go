@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"flag"
 
 	"github.com/google/subcommands"
 )
@@ -24,6 +25,7 @@ func main() {
 	subcommands.Register(&collectCmd{}, "")
 	subcommands.Register(&attestCmd{}, "")
 
+	flag.Parse()
 	ctx := context.Background()
 	os.Exit(int(subcommands.Execute(ctx)))
 }
