@@ -169,7 +169,12 @@ func (c *attestCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subc
 			gpuInfo := gpuQuote.GetGpuInfos()[0]
 			valOpts.GpuArch = gpuInfo.GetGpuArchitecture()
 			verOpts.GpuOpts.GPUArch = gpuInfo.GetGpuArchitecture()
-			mode = detectMode(gpuInfo)
+			var err error
+			mode, err = detectMode(gpuInfo)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to detect operating mode: %v\n", err)
+				return subcommands.ExitFailure
+			}
 		}
 
 		var state *pb.GpuQuoteState
@@ -232,18 +237,16 @@ func (c *attestCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subc
 	return subcommands.ExitSuccess
 }
 
-func detectMode(gpuInfo *pb.GpuInfo) string {
+func detectMode(gpuInfo *pb.GpuInfo) (string, error) {
 	report, err := abi.RawAttestationReportToProto(gpuInfo.GetAttestationReport(), abi.GPU)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse raw attestation report to proto, falling back to SPTMode: %v\n", err)
-		return abi.SPTMode
+		return "", fmt.Errorf("failed to parse raw attestation report to proto: %v", err)
 	}
 
 	parsedMode, err := abi.ParseFeatureFlag(report)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to parse feature flag from attestation report, falling back to SPTMode: %v\n", err)
-		return abi.SPTMode
+		return "", fmt.Errorf("failed to parse feature flag from attestation report: %v", err)
 	}
 
-	return parsedMode
+	return parsedMode, nil
 }

@@ -1,10 +1,17 @@
 package main
 
 import (
-	"context"
+	"bytes"
+	"encoding/hex"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"flag"
+	pb "github.com/google/go-nvattest-tools/proto/nvattest"
+	td "github.com/google/go-nvattest-tools/testing/testdata"
+	"google.golang.org/protobuf/encoding/protojson"
 	"github.com/google/subcommands"
 )
 
@@ -138,13 +145,249 @@ func TestCommandsFlags(t *testing.T) {
 }
 
 func TestAttestCmdExecute(t *testing.T) {
-	ctx := context.Background()
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 
 	t.Run("invalid nonce", func(t *testing.T) {
 		c := &attestCmd{nonce: "invalid"}
-		if got := c.Execute(ctx, fs); got != subcommands.ExitUsageError {
+		if got := c.Execute(t.Context(), fs); got != subcommands.ExitUsageError {
 			t.Errorf("Execute() = %v, want %v", got, subcommands.ExitUsageError)
+		}
+	})
+	t.Run("live attestation fails without gpu", func(t *testing.T) {
+		c := &attestCmd{
+			device: "gpu",
+			nonce:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("Failed to collect GPU evidence")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "Failed to collect GPU evidence")
+		}
+	})
+
+	t.Run("attest nvswitch not implemented", func(t *testing.T) {
+		c := &attestCmd{
+			device: "nvswitch",
+			nonce:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("attest for nvswitch not implemented yet")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "attest for nvswitch not implemented yet")
+		}
+	})
+
+	t.Run("failed mode detection", func(t *testing.T) {
+		tempDir := t.TempDir()
+		gpuInfo := &pb.GpuInfo{
+			Uuid:              "gpu-uuid-1",
+			AttestationReport: []byte("invalid report"),
+		}
+		gpuQuote := &pb.GpuAttestationQuote{
+			GpuInfos: []*pb.GpuInfo{gpuInfo},
+		}
+		evidenceBytes, err := protojson.Marshal(gpuQuote)
+		if err != nil {
+			t.Fatalf("protojson.Marshal failed: %v", err)
+		}
+		evidenceFile := filepath.Join(tempDir, "evidence.json")
+		if err := os.WriteFile(evidenceFile, evidenceBytes, 0644); err != nil {
+			t.Fatalf("os.WriteFile failed: %v", err)
+		}
+
+		c := &attestCmd{
+			device:       "gpu",
+			nonce:        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			evidenceFile: evidenceFile,
+		}
+
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("Failed to detect operating mode")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "Failed to detect operating mode")
+		}
+	})
+
+	t.Run("mpt verification attempted", func(t *testing.T) {
+		tempDir := t.TempDir()
+		evidenceBytes, err := protojson.Marshal(td.MptAttestationDataSet.GpuAttestationQuote)
+		if err != nil {
+			t.Fatalf("protojson.Marshal failed: %v", err)
+		}
+		evidenceFile := filepath.Join(tempDir, "evidence.json")
+		if err := os.WriteFile(evidenceFile, evidenceBytes, 0644); err != nil {
+			t.Fatalf("os.WriteFile failed: %v", err)
+		}
+
+		c := &attestCmd{
+			device:       "gpu",
+			nonce:        hex.EncodeToString(td.MptAttestationDataSet.Nonce),
+			evidenceFile: evidenceFile,
+		}
+
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("MPT Verification failed")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "MPT Verification failed")
+		}
+	})
+}
+
+func TestCollectCmdExecute(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+
+	t.Run("invalid nonce", func(t *testing.T) {
+		c := &collectCmd{nonce: "invalid"}
+		if got := c.Execute(t.Context(), fs); got != subcommands.ExitUsageError {
+			t.Errorf("Execute() = %v, want %v", got, subcommands.ExitUsageError)
+		}
+	})
+
+	t.Run("unknown device", func(t *testing.T) {
+		c := &collectCmd{
+			device: "unknown",
+			nonce:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+		oldStderr := os.Stderr
+		_, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+
+		if got != subcommands.ExitUsageError {
+			t.Errorf("Execute() = %v, want %v", got, subcommands.ExitUsageError)
+		}
+	})
+
+	t.Run("live collect gpu fails without gpu", func(t *testing.T) {
+		c := &collectCmd{
+			device: "gpu",
+			nonce:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("Failed to collect GPU evidence")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "Failed to collect GPU evidence")
+		}
+	})
+
+	t.Run("live collect nvswitch fails without switch", func(t *testing.T) {
+		c := &collectCmd{
+			device: "nvswitch",
+			nonce:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+		oldStderr := os.Stderr
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe() failed: %v", err)
+		}
+		os.Stderr = w
+
+		got := c.Execute(t.Context(), fs)
+
+		w.Close()
+		os.Stderr = oldStderr
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			t.Fatalf("io.Copy() failed: %v", err)
+		}
+
+		if got != subcommands.ExitFailure {
+			t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitFailure, buf.String())
+		}
+		if !bytes.Contains(buf.Bytes(), []byte("Failed to collect Switch evidence")) {
+			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "Failed to collect Switch evidence")
 		}
 	})
 }
