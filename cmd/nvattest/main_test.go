@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"io"
 	"os"
@@ -149,7 +150,7 @@ func TestAttestCmdExecute(t *testing.T) {
 
 	t.Run("invalid nonce", func(t *testing.T) {
 		c := &attestCmd{nonce: "invalid"}
-		if got := c.Execute(t.Context(), fs); got != subcommands.ExitUsageError {
+		if got := c.Execute(context.Background(), fs); got != subcommands.ExitUsageError {
 			t.Errorf("Execute() = %v, want %v", got, subcommands.ExitUsageError)
 		}
 	})
@@ -165,7 +166,7 @@ func TestAttestCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -194,7 +195,7 @@ func TestAttestCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -242,7 +243,7 @@ func TestAttestCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -283,7 +284,7 @@ func TestAttestCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -306,7 +307,7 @@ func TestCollectCmdExecute(t *testing.T) {
 
 	t.Run("invalid nonce", func(t *testing.T) {
 		c := &collectCmd{nonce: "invalid"}
-		if got := c.Execute(t.Context(), fs); got != subcommands.ExitUsageError {
+		if got := c.Execute(context.Background(), fs); got != subcommands.ExitUsageError {
 			t.Errorf("Execute() = %v, want %v", got, subcommands.ExitUsageError)
 		}
 	})
@@ -323,7 +324,7 @@ func TestCollectCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -345,7 +346,7 @@ func TestCollectCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
@@ -374,7 +375,7 @@ func TestCollectCmdExecute(t *testing.T) {
 		}
 		os.Stderr = w
 
-		got := c.Execute(t.Context(), fs)
+		got := c.Execute(context.Background(), fs)
 
 		w.Close()
 		os.Stderr = oldStderr
