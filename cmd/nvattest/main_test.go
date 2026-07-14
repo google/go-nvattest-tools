@@ -4,14 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"flag"
 	pb "github.com/google/go-nvattest-tools/proto/nvattest"
+	"github.com/google/go-nvattest-tools/server/rim"
 	td "github.com/google/go-nvattest-tools/testing/testdata"
+	nvtest "github.com/google/go-nvattest-tools/testing"
 	"google.golang.org/protobuf/encoding/protojson"
 	"github.com/google/subcommands"
 )
@@ -275,6 +279,9 @@ func TestAttestCmdExecute(t *testing.T) {
 			device:       "gpu",
 			nonce:        hex.EncodeToString(td.MptAttestationDataSet.Nonce),
 			evidenceFile: evidenceFile,
+			newRimClient: func(httpClient *http.Client, serviceKey string) rim.Client {
+				return &nvtest.MockRimClient{ErrToReturn: fmt.Errorf("mock error")}
+			},
 		}
 
 		oldStderr := os.Stderr

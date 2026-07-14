@@ -75,8 +75,8 @@ type Options struct {
 	// Now is a time set at which to verify the validity of certificate chains. If unset, uses defaultTimeset().
 	Now *TimeSet
 
-	newRimClient                     func(httpClient *http.Client, serviceKey string) rim.Client
-	newOcspClient                    func(httpClient *http.Client, serviceKey string) nvattestocsp.Client
+	NewRimClient                     func(httpClient *http.Client, serviceKey string) rim.Client
+	NewOcspClient                    func(httpClient *http.Client, serviceKey string) nvattestocsp.Client
 	verifyGPUCertificateChain        func([]*x509.Certificate, *x509.CertPool, Options, string) error
 	verifySwitchCertificateChain     func([]*x509.Certificate, *x509.CertPool, Options, string) error
 	verifyCertificateChain           func(trustedRoots *x509.CertPool, certChain []*x509.Certificate, expectedCertChainLength int, now time.Time, keyUsages ...x509.ExtKeyUsage) error
@@ -106,17 +106,17 @@ func defaultTimeset() *TimeSet {
 }
 
 func setupOptions(opts *Options) {
-	if opts.newRimClient == nil {
-		opts.newRimClient = rim.NewDefaultNvidiaClient
+	if opts.NewRimClient == nil {
+		opts.NewRimClient = rim.NewDefaultNvidiaClient
 	}
-	if opts.newOcspClient == nil {
-		opts.newOcspClient = nvattestocsp.NewDefaultNvidiaClient
+	if opts.NewOcspClient == nil {
+		opts.NewOcspClient = nvattestocsp.NewDefaultNvidiaClient
 	}
 	if opts.RimClient == nil {
-		opts.RimClient = opts.newRimClient(nil, "")
+		opts.RimClient = opts.NewRimClient(nil, "")
 	}
 	if opts.OcspClient == nil {
-		opts.OcspClient = opts.newOcspClient(nil, "")
+		opts.OcspClient = opts.NewOcspClient(nil, "")
 	}
 	if opts.Now == nil {
 		opts.Now = defaultTimeset()

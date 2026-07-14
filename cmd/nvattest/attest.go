@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 
 	"flag"
@@ -14,7 +15,9 @@ import (
 	"github.com/google/go-nvattest-tools/mpt"
 	"github.com/google/go-nvattest-tools/ppcie/server"
 	"github.com/google/go-nvattest-tools/server/ocsp/nvidiaocsp"
+	nvattestocsp "github.com/google/go-nvattest-tools/server/ocsp"
 	"github.com/google/go-nvattest-tools/server/rim/nvidiarim"
+	"github.com/google/go-nvattest-tools/server/rim"
 	"github.com/google/go-nvattest-tools/server/validate"
 	"github.com/google/go-nvattest-tools/server/verify"
 	"github.com/google/go-nvattest-tools/spt"
@@ -35,6 +38,8 @@ type attestCmd struct {
 	deviceOCSPFile  string
 	deviceL4CRLFile string
 	now             *verify.TimeSet
+	newRimClient    func(httpClient *http.Client, serviceKey string) rim.Client
+	newOcspClient   func(httpClient *http.Client, serviceKey string) nvattestocsp.Client
 }
 
 func (*attestCmd) Name() string     { return "attest" }
@@ -65,13 +70,16 @@ func (c *attestCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subc
 		Nonce:           nonceBytes[:],
 		DisableRefCheck: false,
 		GpuArch:         pb.GpuArchitectureType_GPU_ARCHITECTURE_UNSPECIFIED,
+		NewRimClient:    c.newRimClient,
 	}
 	verOpts := verify.Options{
 		GpuOpts: verify.GPUOpts{
 			GPUArch:            pb.GpuArchitectureType_GPU_ARCHITECTURE_UNSPECIFIED,
 			MaxCertChainLength: 5,
 		},
-		Now: c.now,
+		Now:           c.now,
+		NewRimClient:  c.newRimClient,
+		NewOcspClient: c.newOcspClient,
 	}
 
 	if c.rimsFile != "" {

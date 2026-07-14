@@ -45,7 +45,7 @@ type Options struct {
 	GpuArch            pb.GpuArchitectureType              // GPUArch is the expected GPU architecture of the GPU device, it helps locate a specific GPU RIM ID.
 
 	parseAttestationReport func([]byte, abi.AttestationType) (*pb.AttestationReport, error)
-	newRimClient           func(*http.Client, string) rim.Client
+	NewRimClient           func(*http.Client, string) rim.Client
 }
 
 func combineActiveDriverAndVBiosGoldenMeasurements(measurements map[RimType][]rim.GoldenMeasurement) (map[int]rim.GoldenMeasurement, error) {
@@ -86,8 +86,8 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	if opts.parseAttestationReport == nil {
 		opts.parseAttestationReport = abi.RawAttestationReportToProto
 	}
-	if opts.newRimClient == nil {
-		opts.newRimClient = rim.NewDefaultNvidiaClient
+	if opts.NewRimClient == nil {
+		opts.NewRimClient = rim.NewDefaultNvidiaClient
 	}
 	attestationReport, err := opts.parseAttestationReport(rawAttestationReport, opts.AttestationType)
 	if err != nil {
@@ -126,7 +126,7 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	}
 
 	if opts.RimClient == nil {
-		opts.RimClient = opts.newRimClient(nil, "")
+		opts.RimClient = opts.NewRimClient(nil, "")
 	}
 
 	if opts.AttestationType == abi.GPU {

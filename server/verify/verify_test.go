@@ -1248,12 +1248,12 @@ func TestGpuInfo(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			var defaultRimClientCallCount int
-			tc.opts.newRimClient = func(httpClient *http.Client, serviceKey string) rim.Client {
+			tc.opts.NewRimClient = func(httpClient *http.Client, serviceKey string) rim.Client {
 				defaultRimClientCallCount++
 				return &test.MockRimClient{ContentToReturn: []byte("<rim/>")}
 			}
 			var defaultOcspClientCallCount int
-			tc.opts.newOcspClient = func(httpClient *http.Client, serviceKey string) nvattestocsp.Client {
+			tc.opts.NewOcspClient = func(httpClient *http.Client, serviceKey string) nvattestocsp.Client {
 				defaultOcspClientCallCount++
 				return &test.MockOcspClient{}
 			}
@@ -1512,12 +1512,12 @@ func TestSwitchInfo(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			var defaultRimClientCallCount int
-			tc.opts.newRimClient = func(httpClient *http.Client, serviceKey string) rim.Client {
+			tc.opts.NewRimClient = func(httpClient *http.Client, serviceKey string) rim.Client {
 				defaultRimClientCallCount++
 				return &test.MockRimClient{ContentToReturn: []byte("<rim/>")}
 			}
 			var defaultOcspClientCallCount int
-			tc.opts.newOcspClient = func(httpClient *http.Client, serviceKey string) nvattestocsp.Client {
+			tc.opts.NewOcspClient = func(httpClient *http.Client, serviceKey string) nvattestocsp.Client {
 				defaultOcspClientCallCount++
 				return &test.MockOcspClient{}
 			}

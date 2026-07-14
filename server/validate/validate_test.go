@@ -802,7 +802,7 @@ func TestAttestationReport(t *testing.T) {
 				parseAttestationReport: func(b []byte, at abi.AttestationType) (*pb.AttestationReport, error) {
 					return tc.attestationReportFunc()
 				},
-				newRimClient: func(httpClient *http.Client, serviceKey string) rim.Client {
+				NewRimClient: func(httpClient *http.Client, serviceKey string) rim.Client {
 					defaultRimClientCallCount++
 					return &test.MockRimClient{ContentToReturn: []byte("<rim/>")}
 				},
