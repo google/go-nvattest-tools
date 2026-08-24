@@ -22,14 +22,10 @@
 
   <xs:import
 
-    namespace="http://www.w3.org/2000/09/xmldsig#"
-
-    schemaLocation="signSchema.xsd"/>
+    namespace="http://www.w3.org/2000/09/xmldsig#"/>
   <xs:import
 
-    namespace="http://www.w3.org/XML/1998/namespace"
-
-    schemaLocation="xml.xsd"/>
+    namespace="http://www.w3.org/XML/1998/namespace"/>
 
   <xs:annotation>
 
