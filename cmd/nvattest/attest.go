@@ -142,9 +142,9 @@ func (c *attestCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subc
 		}
 
 		verOpts.OcspClient = nvidiaocsp.NewClient(&rimsOCSPCache, &deviceOCSPCache, &deviceL4CrlCache)
-		fmt.Println("Configured for offline verification.")
+		fmt.Println("Configured for offline attestation (using provided RIM and OCSP cache files).")
 	} else {
-		fmt.Println("No --rims_file provided, defaulting to online verification.")
+		fmt.Println("No --rims_file provided: performing local attestation with online retrieval of NVIDIA RIMs and OCSP status.")
 	}
 
 	if c.device == deviceGPU {
