@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build linux/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    # AlmaLinux 8 ships glibc 2.28, so the released binaries also run on older
+    # distributions (RHEL/Rocky/AlmaLinux 8, Ubuntu 20.04+, Debian 11+).
+    container: almalinux:8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            runner: ubuntu-24.04
+          # GitHub-hosted arm64 runners; drop this entry if they are not
+          # available for the repository.
+          - goarch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      # Runs before actions/checkout so that the checkout can use git.
+      - name: Install build dependencies
+        run: |
+          dnf install -y gcc make git curl tar gzip xz findutils diffutils \
+            pkgconf-pkg-config
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # Full history so `git describe` can see the tags.
+          fetch-depth: 0
+
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ inputs.tag || github.ref_name }}
+        run: ./scripts/build-release.sh
+
+      # Guards against the statically linked libxml2 behaving differently from
+      # the system libxml2 the CI job tests against.
+      - name: Test against the statically linked libxml2
+        run: |
+          export CGO_ENABLED=1
+          export PKG_CONFIG_PATH="$(echo dist/.build/libxml2-*-*/lib/pkgconfig)"
+          export CGO_LDFLAGS="-lm"
+          go test ./server/rim/... ./cmd/nvattest/...
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvattest-linux-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksum file
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS \
+              --title "$TAG" \
+              --generate-notes
+          fi
