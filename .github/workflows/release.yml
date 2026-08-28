@@ -63,7 +63,7 @@ jobs:
       - name: Test against the statically linked libxml2
         run: |
           export CGO_ENABLED=1
-          export PKG_CONFIG_PATH="$(echo dist/.build/libxml2-*-*/lib/pkgconfig)"
+          export PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/$(echo dist/.build/libxml2-*-*/lib/pkgconfig)"
           export CGO_LDFLAGS="-lm"
           go test ./server/rim/... ./cmd/nvattest/...
 
