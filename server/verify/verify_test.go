@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
@@ -1666,4 +1667,61 @@ func TestSwitchInfoCustomDeviceRootCertPool(t *testing.T) {
 	if capturedOCSPPool != customDevicePool {
 		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedOCSPPool, customDevicePool)
 	}
+}
+
+// hasCertificateBlock reports whether data contains at least one PEM block of
+// type CERTIFICATE.
+func hasCertificateBlock(data []byte) bool {
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			return false
+		}
+		if block.Type == "CERTIFICATE" {
+			return true
+		}
+	}
+}
+
+// FuzzParsePEMCertificateChain checks the PEM chain wrapper's result contract
+// on arbitrary input: certs are non-nil iff err is nil, and input without a
+// CERTIFICATE block yields ErrNoCertificateChain.
+func FuzzParsePEMCertificateChain(f *testing.F) {
+	f.Add(td.GpuAttestationCertificateChain)
+	f.Add(td.SwitchAttestationCertificateChain)
+	f.Add([]byte{})
+	f.Add([]byte("-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----"))
+	f.Add([]byte("-----BEGIN OTHER-----\naGVsbG8=\n-----END OTHER-----"))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		certs, err := ParsePEMCertificateChain(data)
+		if !hasCertificateBlock(data) {
+			if !errors.Is(err, ErrNoCertificateChain) {
+				t.Errorf("ParsePEMCertificateChain() without CERTIFICATE block: error = %v, want %v", err, ErrNoCertificateChain)
+			}
+			if certs != nil {
+				t.Errorf("ParsePEMCertificateChain() without CERTIFICATE block returned non-nil certs")
+			}
+			return
+		}
+		if err != nil {
+			if certs != nil {
+				t.Errorf("ParsePEMCertificateChain() returned non-nil certs on error: %v", err)
+			}
+			return
+		}
+		if len(certs) == 0 {
+			t.Errorf("ParsePEMCertificateChain() returned empty certs slice without error")
+		}
+		for i, cert := range certs {
+			if cert == nil {
+				t.Errorf("ParsePEMCertificateChain() returned nil cert at index %d", i)
+				continue
+			}
+			if len(cert.Raw) == 0 {
+				t.Errorf("ParsePEMCertificateChain() returned cert with empty Raw bytes at index %d", i)
+			}
+		}
+	})
 }
