@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"flag"
 
@@ -142,6 +143,21 @@ func (c *attestCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subc
 		}
 
 		verOpts.OcspClient = nvidiaocsp.NewClient(&rimsOCSPCache, &deviceOCSPCache, &deviceL4CrlCache)
+		if verOpts.Now == nil {
+			// Check each cache as of when it was fetched. Cached OCSP responses are
+			// valid for a day and their responder certificates eventually expire, so
+			// checking them as of now would reject every cache sooner or later. The
+			// GPU and switch certificate chains come from live evidence and are still
+			// checked as of now.
+			now := time.Now()
+			verOpts.Now = &verify.TimeSet{
+				GPUCertChain:        now,
+				SwitchCertChain:     now,
+				RIMCertChain:        rimsCache.GetLastUpdated().AsTime(),
+				RIMOCSPCertChain:    rimsOCSPCache.GetLastUpdated().AsTime(),
+				DeviceOCSPCertChain: deviceOCSPCache.GetLastUpdated().AsTime(),
+			}
+		}
 		fmt.Println("Configured for offline attestation (using provided RIM and OCSP cache files).")
 	} else {
 		fmt.Println("No --rims_file provided: performing local attestation with online retrieval of NVIDIA RIMs and OCSP status.")

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -13,10 +15,17 @@ import (
 
 	"flag"
 	pb "github.com/google/go-nvattest-tools/proto/nvattest"
+	ocsppb "github.com/google/go-nvattest-tools/proto/nvocsp"
+	nvrimpb "github.com/google/go-nvattest-tools/proto/nvrim"
 	"github.com/google/go-nvattest-tools/server/rim"
+	"github.com/google/go-nvattest-tools/server/verify"
 	td "github.com/google/go-nvattest-tools/testing/testdata"
 	nvtest "github.com/google/go-nvattest-tools/testing"
+	"golang.org/x/crypto/ocsp"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"github.com/google/subcommands"
 )
 
@@ -398,4 +407,130 @@ func TestCollectCmdExecute(t *testing.T) {
 			t.Errorf("Execute() stderr = %q, want substring %q", buf.String(), "Failed to collect Switch evidence")
 		}
 	})
+}
+
+// TestAttestCmdExecuteOffline verifies evidence against cache files built from
+// OCSP responses whose responder certificates have since expired. Offline
+// attestation must check each cache file as of its last_updated time, not as of
+// now, or every cache eventually stops verifying.
+func TestAttestCmdExecuteOffline(t *testing.T) {
+	dir := t.TempDir()
+	writeFile := func(name string, data []byte) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatalf("os.WriteFile(%q) failed: %v", path, err)
+		}
+		return path
+	}
+	writeTextproto := func(name string, m proto.Message) string {
+		t.Helper()
+		data, err := prototext.Marshal(m)
+		if err != nil {
+			t.Fatalf("prototext.Marshal(%q) failed: %v", name, err)
+		}
+		return writeFile(name, data)
+	}
+	// Cache keys match nvidiaocsp's lookup: "{serial_number}:{issuer_dn}".
+	key := func(c *x509.Certificate) string { return c.SerialNumber.String() + ":" + c.Issuer.String() }
+	status := func(level ocsppb.CertificateLevel, resp *ocsp.Response) *ocsppb.OCSPResponses_CertStatusInfo {
+		s := &ocsppb.OCSPResponses_CertStatusInfo{}
+		s.SetCertIndex(level)
+		if resp != nil {
+			s.SetRawOcspResponseBytes(resp.Raw)
+		}
+		return s
+	}
+
+	// RIMs and their OCSP responses, cached when those responses were issued.
+	rimTime := td.ParsedRimOcspResponseCertL2.ThisUpdate
+	rimsData := map[string]string{}
+	rimsStatus := map[string]*ocsppb.OCSPResponses_CertStatusInfo{}
+	for _, r := range []struct {
+		id   string
+		file string
+		l4   *ocsp.Response
+	}{
+		{id: td.ExpectedGpuDriverRimFileID, file: "rim/NV_GPU_DRIVER_GH100_550.90.07.xml", l4: td.ParsedDriverRimOcspResponseCertL4},
+		{id: td.ExpectedGpuVbiosRimFileID, file: "rim/NV_GPU_VBIOS_1010_0200_882_96009F0001.xml", l4: td.ParsedVbiosRimOcspResponseCertL4},
+	} {
+		xml, err := td.ReadXMLFile(r.file)
+		if err != nil {
+			t.Fatalf("td.ReadXMLFile(%q) failed: %v", r.file, err)
+		}
+		parsed, err := rim.Parse(xml)
+		if err != nil {
+			t.Fatalf("rim.Parse(%q) failed: %v", r.file, err)
+		}
+		rimsData[r.id] = base64.StdEncoding.EncodeToString(xml)
+		// L4 (leaf), L3, L2, L1 (root). L3 and L2 are shared across RIMs.
+		chain := parsed.CertificateChain()
+		rimsStatus[key(chain[0])] = status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L4, r.l4)
+		rimsStatus[key(chain[1])] = status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L3, td.ParsedRimOcspResponseCertL3)
+		rimsStatus[key(chain[2])] = status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L2, td.ParsedRimOcspResponseCertL2)
+	}
+	rims := &nvrimpb.NvidiaRims{}
+	rims.SetRimsData(rimsData)
+	rims.SetLastUpdated(timestamppb.New(rimTime))
+	rimsOCSP := &ocsppb.OCSPResponses{}
+	rimsOCSP.SetCertStatusInfo(rimsStatus)
+	rimsOCSP.SetLastUpdated(timestamppb.New(rimTime))
+
+	// Device OCSP responses for L1-L3, cached when they were issued.
+	// L5 (leaf), L4, L3, L2, L1 (root).
+	gpuChain, err := verify.ParsePEMCertificateChain(td.GpuAttestationCertificateChain)
+	if err != nil {
+		t.Fatalf("verify.ParsePEMCertificateChain() failed: %v", err)
+	}
+	deviceOCSP := &ocsppb.OCSPResponses{}
+	deviceOCSP.SetCertStatusInfo(map[string]*ocsppb.OCSPResponses_CertStatusInfo{
+		key(gpuChain[2]): status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L3, td.ParsedGpuOcspResponseCertL3),
+		key(gpuChain[3]): status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L2, td.ParsedGpuOcspResponseCertL2),
+		key(gpuChain[4]): status(ocsppb.CertificateLevel_CERTIFICATE_LEVEL_L1, nil),
+	})
+	deviceOCSP.SetLastUpdated(timestamppb.New(td.ParsedGpuOcspResponseCertL2.ThisUpdate))
+
+	evidence, err := protojson.Marshal(&pb.GpuAttestationQuote{
+		GpuInfos: []*pb.GpuInfo{{
+			Uuid:                        "gpu-uuid-1",
+			DriverVersion:               td.RawGpuAttestationReportTestData.DriverVersion,
+			VbiosVersion:                td.RawGpuAttestationReportTestData.VBiosVersion,
+			GpuArchitecture:             pb.GpuArchitectureType_GPU_ARCHITECTURE_HOPPER,
+			AttestationCertificateChain: td.GpuAttestationCertificateChain,
+			AttestationReport:           td.RawGpuAttestationReportTestData.RawAttestationReport,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("protojson.Marshal() failed: %v", err)
+	}
+
+	c := &attestCmd{
+		device:          deviceGPU,
+		nonce:           hex.EncodeToString(td.RawGpuAttestationReportTestData.Nonce),
+		evidenceFile:    writeFile("evidence.json", evidence),
+		rimsFile:        writeTextproto("rims.textproto", rims),
+		rimsOCSPFile:    writeTextproto("rims_ocsp.textproto", rimsOCSP),
+		deviceOCSPFile:  writeTextproto("device_ocsp.textproto", deviceOCSP),
+		deviceL4CRLFile: writeTextproto("device_l4_crl.textproto", &ocsppb.DeviceL4RevokedCerts{}),
+	}
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() failed: %v", err)
+	}
+	os.Stderr = w
+
+	got := c.Execute(context.Background(), flag.NewFlagSet("test", flag.ContinueOnError))
+
+	w.Close()
+	os.Stderr = oldStderr
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy() failed: %v", err)
+	}
+
+	if got != subcommands.ExitSuccess {
+		t.Errorf("Execute() = %v, want %v\nStderr: %s", got, subcommands.ExitSuccess, buf.String())
+	}
 }
