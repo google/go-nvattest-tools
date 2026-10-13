@@ -64,14 +64,16 @@ var (
 
 // Options holds configuration parameters needed for the verification process provided by the user.
 type Options struct {
-	AllowOCSPCertHold bool                // If true, the OCSP revocation reason `CertificateHold` is considered valid.
-	DisableRIMCheck   bool                // If true, skip RIM check for driver + vbios for GPU, and bios for switch.
-	DisableOCSPCheck  bool                // If true, skip OCSP check for certificate chain.
-	rimSchemaPath     string              // rimSchemaPath is the path to the RIM schema file that is used to validate the RIM XML file.
-	RimClient         rim.Client          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
-	OcspClient        nvattestocsp.Client // OCSP client to fetch OCSP responses for RIM and device certificate chains.
-	GpuOpts           GPUOpts             // GPU-specific configs for verifying GPU attestation.
-	SwitchOpts        SwitchOpts          // Switch-specific configs for verifying switch attestation.
+	AllowOCSPCertHold  bool                // If true, the OCSP revocation reason `CertificateHold` is considered valid.
+	DisableRIMCheck    bool                // If true, skip RIM check for driver + vbios for GPU, and bios for switch.
+	DisableOCSPCheck   bool                // If true, skip OCSP check for certificate chain.
+	DeviceRootCertPool *x509.CertPool      // DeviceRootCertPool defaults to cert.DeviceRootCertPool if nil.
+	RimRootCertPool    *x509.CertPool      // RimRootCertPool defaults to cert.RimRootCertPool if nil.
+	rimSchemaPath      string              // rimSchemaPath is the path to the RIM schema file that is used to validate the RIM XML file.
+	RimClient          rim.Client          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
+	OcspClient         nvattestocsp.Client // OCSP client to fetch OCSP responses for RIM and device certificate chains.
+	GpuOpts            GPUOpts             // GPU-specific configs for verifying GPU attestation.
+	SwitchOpts         SwitchOpts          // Switch-specific configs for verifying switch attestation.
 	// Now is a time set at which to verify the validity of certificate chains. If unset, uses defaultTimeset().
 	Now *TimeSet
 
@@ -106,6 +108,12 @@ func defaultTimeset() *TimeSet {
 }
 
 func setupOptions(opts *Options) {
+	if opts.DeviceRootCertPool == nil {
+		opts.DeviceRootCertPool = cert.DeviceRootCertPool
+	}
+	if opts.RimRootCertPool == nil {
+		opts.RimRootCertPool = cert.RimRootCertPool
+	}
 	if opts.NewRimClient == nil {
 		opts.NewRimClient = rim.NewDefaultNvidiaClient
 	}
@@ -191,13 +199,13 @@ func GpuInfo(ctx context.Context, gpuInfo *pb.GpuInfo, opts Options) (*pb.GpuInf
 
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
 	attestationReportFWID := hex.EncodeToString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_FWID))
-	if err := opts.verifyGPUCertificateChain(certificateChain, cert.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
+	if err := opts.verifyGPUCertificateChain(certificateChain, opts.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
 		return nil, err
 	}
 	gpuInfoState.AttestationCertificateChain = gpuInfo.GetAttestationCertificateChain()
 
 	// 3. verify OCSP status for the certificate chain.
-	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, cert.DeviceRootCertPool, opts, verificationModeGPU, opts.Now.DeviceOCSPCertChain)
+	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, opts.DeviceRootCertPool, opts, verificationModeGPU, opts.Now.DeviceOCSPCertChain)
 	if ocspState != nil {
 		gpuInfoState.CertChainOcsp = ocspState
 	}
@@ -263,13 +271,13 @@ func SwitchInfo(ctx context.Context, switchInfo *pb.SwitchInfo, opts Options) (*
 
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
 	attestationReportFWID := hex.EncodeToString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_FWID))
-	if err := opts.verifySwitchCertificateChain(certificateChain, cert.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
+	if err := opts.verifySwitchCertificateChain(certificateChain, opts.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
 		return nil, err
 	}
 	switchInfoState.AttestationCertificateChain = switchInfo.GetAttestationCertificateChain()
 
 	// 3. verify OCSP status for the certificate chain.
-	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, cert.DeviceRootCertPool, opts, verificationModeSwitch, opts.Now.DeviceOCSPCertChain)
+	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, opts.DeviceRootCertPool, opts, verificationModeSwitch, opts.Now.DeviceOCSPCertChain)
 	if ocspState != nil {
 		switchInfoState.CertChainOcsp = ocspState
 	}
@@ -483,12 +491,12 @@ var defaultVerifyRIM = func(ctx context.Context, opts Options, rimData Evaluator
 
 	// 3. Validate the RIM Certificate Chain.
 	rimCertChain := rimData.CertificateChain()
-	if err := opts.verifyCertificateChain(cert.RimRootCertPool, rimCertChain, len(rimCertChain), opts.Now.RIMCertChain); err != nil {
+	if err := opts.verifyCertificateChain(opts.RimRootCertPool, rimCertChain, len(rimCertChain), opts.Now.RIMCertChain); err != nil {
 		return finalRimState, fmt.Errorf("%w: could not verify certificate chain: %v", ErrRimVerificationFailed, err)
 	}
 
 	// 4. Verify OCSP Status of the RIM Certificate Chain.
-	rimOcspState, err := opts.verifyCertificateChainWithOCSP(ctx, rimCertChain, cert.RimRootCertPool, opts, verificationModeRIM, opts.Now.RIMOCSPCertChain)
+	rimOcspState, err := opts.verifyCertificateChainWithOCSP(ctx, rimCertChain, opts.RimRootCertPool, opts, verificationModeRIM, opts.Now.RIMOCSPCertChain)
 	if err != nil {
 		if rimOcspState != nil {
 			finalRimState.CertChainOcsp = rimOcspState
