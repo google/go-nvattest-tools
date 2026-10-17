@@ -428,6 +428,63 @@ func TestRuntimeMeasurements(t *testing.T) {
 	}
 }
 
+func TestReportVersions(t *testing.T) {
+	field := func(dataType pb.OpaqueDataType, value []byte) *pb.OpaqueFieldData {
+		return &pb.OpaqueFieldData{DataType: dataType, Data: &pb.OpaqueFieldData_Value{Value: value}}
+	}
+	driver := pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION
+	vbios := pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION
+
+	testcases := []struct {
+		name            string
+		ofds            []*pb.OpaqueFieldData
+		attestationType abi.AttestationType
+		wantDriver      string
+		wantVbios       string
+	}{
+		{
+			name:            "driver_version_trailing_null_removed",
+			ofds:            []*pb.OpaqueFieldData{field(driver, []byte("550.90.07\x00"))},
+			attestationType: abi.GPU,
+			wantDriver:      "550.90.07",
+		},
+		{
+			name:            "duplicate_driver_version_uses_first",
+			ofds:            []*pb.OpaqueFieldData{field(driver, []byte("550.90.07")), field(driver, []byte("1.2.3"))},
+			attestationType: abi.GPU,
+			wantDriver:      "550.90.07",
+		},
+		{
+			name:            "duplicate_gpu_vbios_version_uses_first",
+			ofds:            []*pb.OpaqueFieldData{field(vbios, []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}), field(vbios, []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18})},
+			attestationType: abi.GPU,
+			wantVbios:       "04.03.02.01.05",
+		},
+		{
+			name:            "duplicate_switch_vbios_version_uses_first",
+			ofds:            []*pb.OpaqueFieldData{field(vbios, []byte("96.10.6D.00.01")), field(vbios, []byte("99.99.99.99.99"))},
+			attestationType: abi.SWITCH,
+			wantVbios:       "96.10.6D.00.01",
+		},
+		{
+			name:            "missing_fields_return_empty",
+			attestationType: abi.GPU,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDriver, gotVbios := reportVersions(tc.ofds, tc.attestationType)
+			if gotDriver != tc.wantDriver {
+				t.Errorf("reportVersions() driver version = %q, want %q", gotDriver, tc.wantDriver)
+			}
+			if gotVbios != tc.wantVbios {
+				t.Errorf("reportVersions() VBIOS version = %q, want %q", gotVbios, tc.wantVbios)
+			}
+		})
+	}
+}
+
 func TestCombineActiveDriverAndVBiosGoldenMeasurements(t *testing.T) {
 	testcases := []struct {
 		name                     string
