@@ -530,3 +530,114 @@ func TestVerifySystemQuotes(t *testing.T) {
 		})
 	}
 }
+
+// newQuotes returns a GPU quote with gpuCount reports and a switch quote with
+// switchCount reports.
+func newQuotes(gpuCount, switchCount int) (*nvattestpb.GpuAttestationQuote, *nvattestpb.SwitchAttestationQuote) {
+	gpuQuote := &nvattestpb.GpuAttestationQuote{}
+	for i := range gpuCount {
+		gpuQuote.GpuInfos = append(gpuQuote.GpuInfos, &nvattestpb.GpuInfo{Uuid: fmt.Sprintf("gpu%d", i)})
+	}
+	switchQuote := &nvattestpb.SwitchAttestationQuote{}
+	for i := range switchCount {
+		switchQuote.SwitchInfos = append(switchQuote.SwitchInfos, &nvattestpb.SwitchInfo{Uuid: fmt.Sprintf("switch%d", i)})
+	}
+	return gpuQuote, switchQuote
+}
+
+// countingOpts returns opts with stubs that succeed and count verification calls.
+func countingOpts(opts Options, verifyCalls *int) Options {
+	opts.validateModesFn = func(*nvattestpb.GpuAttestationQuote, string) error { return nil }
+	opts.verifyGpuInfoFn = func(_ context.Context, gpuInfo *nvattestpb.GpuInfo, _ verify.Options) (*nvattestpb.GpuInfoState, error) {
+		*verifyCalls++
+		return &nvattestpb.GpuInfoState{GpuUuid: gpuInfo.GetUuid()}, nil
+	}
+	opts.verifySwitchInfoFn = func(_ context.Context, switchInfo *nvattestpb.SwitchInfo, _ verify.Options) (*nvattestpb.SwitchInfoState, error) {
+		*verifyCalls++
+		return &nvattestpb.SwitchInfoState{SwitchUuid: switchInfo.GetUuid()}, nil
+	}
+	opts.validateAttestationReportFn = func(context.Context, []byte, validate.Options) error { return nil }
+	return opts
+}
+
+func TestVerifySystemQuotes_CountMismatchFailsBeforeVerification(t *testing.T) {
+	testCases := []struct {
+		name        string
+		gpuCount    int
+		switchCount int
+		wantErr     error
+	}{
+		{
+			name:        "extra_gpu",
+			gpuCount:    9,
+			switchCount: 4,
+			wantErr:     ErrTopologyGpuCountMismatch,
+		},
+		{
+			name:        "extra_switch",
+			gpuCount:    8,
+			switchCount: 5,
+			wantErr:     ErrTopologySwitchCountMismatch,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gpuQuote, switchQuote := newQuotes(tc.gpuCount, tc.switchCount)
+			verifyCalls := 0
+			opts := countingOpts(Options{ExpectedGpuCount: 8, ExpectedSwitchCount: 4}, &verifyCalls)
+
+			_, _, err := VerifySystemQuotes(t.Context(), gpuQuote, switchQuote, opts)
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("VerifySystemQuotes() with %d GPUs and %d switches = %v, want %v", tc.gpuCount, tc.switchCount, err, tc.wantErr)
+			}
+			if verifyCalls != 0 {
+				t.Errorf("VerifySystemQuotes() with %d GPUs and %d switches verified %d reports, want 0", tc.gpuCount, tc.switchCount, verifyCalls)
+			}
+		})
+	}
+}
+
+func TestVerifySystemQuotes_CountMatchSucceeds(t *testing.T) {
+	testCases := []struct {
+		name        string
+		gpuCount    int
+		switchCount int
+		opts        Options
+	}{
+		{
+			name:        "exact_counts",
+			gpuCount:    8,
+			switchCount: 4,
+			opts:        Options{ExpectedGpuCount: 8, ExpectedSwitchCount: 4},
+		},
+		{
+			name:        "zero_counts_not_enforced",
+			gpuCount:    9,
+			switchCount: 5,
+			opts:        Options{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gpuQuote, switchQuote := newQuotes(tc.gpuCount, tc.switchCount)
+			verifyCalls := 0
+			opts := countingOpts(tc.opts, &verifyCalls)
+
+			gpuState, switchState, err := VerifySystemQuotes(t.Context(), gpuQuote, switchQuote, opts)
+			if err != nil {
+				t.Fatalf("VerifySystemQuotes() with opts %+v = %v, want nil", tc.opts, err)
+			}
+			if got := len(gpuState.GetGpuInfoStates()); got != tc.gpuCount {
+				t.Errorf("VerifySystemQuotes() returned %d GPU states, want %d", got, tc.gpuCount)
+			}
+			if got := len(switchState.GetSwitchInfoStates()); got != tc.switchCount {
+				t.Errorf("VerifySystemQuotes() returned %d switch states, want %d", got, tc.switchCount)
+			}
+			if want := tc.gpuCount + tc.switchCount; verifyCalls != want {
+				t.Errorf("VerifySystemQuotes() verified %d reports, want %d", verifyCalls, want)
+			}
+		})
+	}
+}

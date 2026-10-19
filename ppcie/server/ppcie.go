@@ -55,6 +55,12 @@ func ValidateSystemTopology(ctx context.Context, gpuAttestationReports []*nvatte
 
 // VerifySystemQuotes verifies previously collected GpuAttestationQuote and SwitchAttestationQuote.
 // It orchestrates calls to the verify and validate packages for each device.
+//
+// If opts.ExpectedGpuCount or opts.ExpectedSwitchCount is greater than zero, the
+// number of reports in the corresponding quote must match it. This check runs
+// before any report is verified, and a mismatch returns an error that wraps
+// ErrTopologyGpuCountMismatch or ErrTopologySwitchCountMismatch. A zero count is
+// not enforced.
 func VerifySystemQuotes(ctx context.Context, gpuQuote *nvattestpb.GpuAttestationQuote, switchQuote *nvattestpb.SwitchAttestationQuote, opts Options) (*nvattestpb.GpuQuoteState, *nvattestpb.SwitchQuoteState, error) {
 	if opts.verifyGpuInfoFn == nil {
 		opts.verifyGpuInfoFn = verify.GpuInfo
@@ -67,6 +73,15 @@ func VerifySystemQuotes(ctx context.Context, gpuQuote *nvattestpb.GpuAttestation
 	}
 	if opts.validateModesFn == nil {
 		opts.validateModesFn = utility.ValidateModes
+	}
+
+	// Check the device counts before verification, because each report costs
+	// several signature checks.
+	if got := len(gpuQuote.GetGpuInfos()); opts.ExpectedGpuCount > 0 && got != opts.ExpectedGpuCount {
+		return nil, nil, fmt.Errorf("%w: got %d GPU reports, want %d", ErrTopologyGpuCountMismatch, got, opts.ExpectedGpuCount)
+	}
+	if got := len(switchQuote.GetSwitchInfos()); opts.ExpectedSwitchCount > 0 && got != opts.ExpectedSwitchCount {
+		return nil, nil, fmt.Errorf("%w: got %d NVSwitch reports, want %d", ErrTopologySwitchCountMismatch, got, opts.ExpectedSwitchCount)
 	}
 
 	gpuQuoteState := &nvattestpb.GpuQuoteState{

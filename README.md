@@ -106,6 +106,9 @@ for multi-GPU verification without NVSwitches.
 
 -   `mpt.VerifySystemQuotes(ctx context.Context, quote *pb.GpuAttestationQuote, opts mpt.Options) (*pb.GpuQuoteState, error)`: Verifies and validates attestation for multiple GPUs.
 
+`mpt.VerifySystemQuotes` rejects a quote with more than `opts.MaxGpuCount` GPU
+reports (default `mpt.DefaultMaxGpuCount`, 16) before it verifies any report.
+
 **Example:**
 
 ```go
@@ -157,6 +160,9 @@ topology validation.
 
 -   `ppcieserver.VerifySystemQuotes(ctx context.Context, gpuQuote *pb.GpuAttestationQuote, switchQuote *pb.SwitchAttestationQuote, opts ppcieserver.Options) (*pb.GpuQuoteState, *pb.SwitchQuoteState, error)`: Verifies GPU and NVSwitch quotes.
 -   `ppcieserver.ValidateSystemTopology(ctx context.Context, gpuAttestationReports []*pb.AttestationReport, switchAttestationReports []*pb.AttestationReport, opts *ppcieserver.Options) error`: Validates topology based on information in attestation reports.
+
+When `ExpectedGpuCount` or `ExpectedSwitchCount` is set, `ppcieserver.VerifySystemQuotes`
+checks the number of device reports against it before it verifies any report.
 
 **Example:**
 
