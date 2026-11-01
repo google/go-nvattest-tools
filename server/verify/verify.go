@@ -283,7 +283,10 @@ func SwitchInfo(ctx context.Context, switchInfo *pb.SwitchInfo, opts Options) (*
 	}
 	switchInfoState.SignatureVerified = true
 
-	version := utility.FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), abi.SWITCH)
+	version, err := utility.FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), abi.SWITCH)
+	if err != nil {
+		return nil, err
+	}
 	switchInfoState.BiosVersion = version
 
 	// 5. Fetch and Verify RIM.

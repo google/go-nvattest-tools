@@ -75,20 +75,33 @@ func readFieldAsLittleEndian(data []byte) string {
 	return result.String()
 }
 
-// FormatVbiosVersion converts the input VBIOS version in byte format to xx.xx.xx.xx.xx format.
-func FormatVbiosVersion(version []byte, mode abi.AttestationType) string {
+// FormatVbiosVersion formats the VBIOS version field of an attestation report.
+// For abi.GPU, version must have an even length of at least 2 bytes, and the result is
+// dot-separated hex bytes, for example "96.00.9f.00.01".
+// For abi.SWITCH, the result is version as a string.
+// For other modes, it returns *abi.UnsupportedAttestationTypeError.
+func FormatVbiosVersion(version []byte, mode abi.AttestationType) (string, error) {
 	switch mode {
 	case abi.GPU:
 		return formatGpuVbiosVersion(version)
 	case abi.SWITCH:
-		return formatSwitchBiosVersion(version)
+		return formatSwitchBiosVersion(version), nil
 	default:
-		return ""
+		return "", &abi.UnsupportedAttestationTypeError{AttestationType: mode}
 	}
 }
 
 // Reference: https://github.com/NVIDIA/nvtrust/blob/7960697fe7a36a1085656576622e386f4d52194d/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/utils/__init__.py#L167
-func formatGpuVbiosVersion(version []byte) string {
+func formatGpuVbiosVersion(version []byte) (string, error) {
+	// The output is a version string such as 96.00.9f.00.01. The first half of the input is
+	// a little-endian number that gives all parts except the last. The next byte gives the
+	// last part. Example: 01 02 03 04 05 06 07 08 -> 04.03.02.01.05.
+	// So the input must have an even number of bytes, at least 2.
+	// NVIDIA does not check this length, but an odd length gives an odd-length version,
+	// and every known RIM file ID has a 10-hex-character version.
+	if len(version) < 2 || len(version)%2 != 0 {
+		return "", fmt.Errorf("invalid GPU VBIOS version length %d: want an even number of bytes, at least 2", len(version))
+	}
 	value := readFieldAsLittleEndian(version)
 
 	halfLength := len(value) / 2
@@ -103,7 +116,7 @@ func formatGpuVbiosVersion(version []byte) string {
 	}
 
 	// Join all the collected parts with a period.
-	return strings.Join(parts, ".")
+	return strings.Join(parts, "."), nil
 }
 
 // Reference: https://github.com/NVIDIA/nvtrust/blob/5603ffe029b87ce62aeaec6abef081d9e21d1db6/guest_tools/attestation_sdk/src/nv_attestation_sdk/verifiers/nv_switch_verifier/utils/__init__.py#L121
@@ -133,21 +146,25 @@ func driverRIMFileID(driverVersion string, opaqueFieldDataList []*pb.OpaqueField
 
 // vbiosRIMFileID returns the file ID for the VBIOS RIM (GPU and Switch).
 // reference to equivalent nvtrust library logic : https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
-func vbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) string {
+func vbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
 	project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
 	projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
 	chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
-	vbiosVersionForID := strings.ToUpper(strings.ReplaceAll(FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), mode), ".", ""))
+	vbiosVersion, err := FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), mode)
+	if err != nil {
+		return "", err
+	}
+	vbiosVersionForID := strings.ToUpper(strings.ReplaceAll(vbiosVersion, ".", ""))
 
 	switch mode {
 	case abi.GPU:
-		return fmt.Sprintf("NV_GPU_VBIOS_%s_%s_%s_%s", project, projectSKU, chipSKU, vbiosVersionForID)
+		return fmt.Sprintf("NV_GPU_VBIOS_%s_%s_%s_%s", project, projectSKU, chipSKU, vbiosVersionForID), nil
 	case abi.SWITCH:
 		// NV Switch doesn't have project, projectSKU and chipSKU fields and should be hardcoded.
 		// Reference: https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/attestation_sdk/src/nv_attestation_sdk/verifiers/nv_switch_verifier/config.py#L42-L44
-		return fmt.Sprintf("NV_SWITCH_BIOS_5612_0002_890_%s", vbiosVersionForID)
+		return fmt.Sprintf("NV_SWITCH_BIOS_5612_0002_890_%s", vbiosVersionForID), nil
 	default:
-		return ""
+		return "", &abi.UnsupportedAttestationTypeError{AttestationType: mode}
 	}
 }
 
@@ -174,7 +191,10 @@ var DriverRIMData = func(ctx context.Context, driverVersion string, reportProto 
 
 func vbiosRIMData(ctx context.Context, reportProto *pb.AttestationReport, rimClient rim.Client, mode abi.AttestationType) (*rim.Data, error) {
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
-	fileID := vbiosRIMFileID(opaqueFieldDataList, mode)
+	fileID, err := vbiosRIMFileID(opaqueFieldDataList, mode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vbios RIM file ID: %w", err)
+	}
 	vbiosRimContentBytes, err := rimClient.FetchRIM(ctx, fileID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch vbios RIM content: %w", err)

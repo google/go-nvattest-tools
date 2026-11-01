@@ -109,7 +109,10 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 			driverVersion = string(bytes.TrimSuffix(ofd.GetValue(), []byte{0x00}))
 		}
 		if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION {
-			vbiosVersion = utility.FormatVbiosVersion(ofd.GetValue(), opts.AttestationType)
+			vbiosVersion, err = utility.FormatVbiosVersion(ofd.GetValue(), opts.AttestationType)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
