@@ -61,8 +61,9 @@ func ValidateModes(quote *pb.GpuAttestationQuote, expectedMode string) error {
 	return nil
 }
 
-func normalizeOpaqueString(bytes []byte) string {
-	return strings.ToUpper(strings.Trim(strings.TrimSpace(string(bytes)), "\x00"))
+func normalizeOpaqueString(b []byte) string {
+	before, _, _ := bytes.Cut(b, []byte{0})
+	return strings.ToUpper(string(before))
 }
 
 func readFieldAsLittleEndian(data []byte) string {
@@ -144,12 +145,16 @@ func driverRIMFileID(driverVersion string, opaqueFieldDataList []*pb.OpaqueField
 	return prefix + driverVersion, nil
 }
 
-// vbiosRIMFileID returns the file ID for the VBIOS RIM (GPU and Switch).
-// reference to equivalent nvtrust library logic : https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
-func vbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
-	project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
-	projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
-	chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
+// VbiosRIMFileID returns the file ID for the VBIOS RIM built from SPDM opaque data.
+// For abi.GPU, opaqueFieldDataList must include non-empty project, project SKU, chip SKU,
+// and a valid VBIOS version, and the result has the form
+// "NV_GPU_VBIOS_<PROJECT>_<PROJECT_SKU>_<CHIP_SKU>_<VBIOS_VERSION>"
+// (for example, "NV_GPU_VBIOS_1010_0200_882_96009F0001").
+// For abi.SWITCH, opaqueFieldDataList must include a VBIOS version, and the result has the form
+// "NV_SWITCH_BIOS_5612_0002_890_<VBIOS_VERSION>".
+// For other modes, it returns *abi.UnsupportedAttestationTypeError.
+// Reference: https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
+func VbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
 	vbiosVersion, err := FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), mode)
 	if err != nil {
 		return "", err
@@ -158,6 +163,18 @@ func vbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.Attestat
 
 	switch mode {
 	case abi.GPU:
+		project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
+		if project == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing project")
+		}
+		projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
+		if projectSKU == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing project SKU")
+		}
+		chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
+		if chipSKU == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing chip SKU")
+		}
 		return fmt.Sprintf("NV_GPU_VBIOS_%s_%s_%s_%s", project, projectSKU, chipSKU, vbiosVersionForID), nil
 	case abi.SWITCH:
 		// NV Switch doesn't have project, projectSKU and chipSKU fields and should be hardcoded.
@@ -191,7 +208,7 @@ var DriverRIMData = func(ctx context.Context, driverVersion string, reportProto 
 
 func vbiosRIMData(ctx context.Context, reportProto *pb.AttestationReport, rimClient rim.Client, mode abi.AttestationType) (*rim.Data, error) {
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
-	fileID, err := vbiosRIMFileID(opaqueFieldDataList, mode)
+	fileID, err := VbiosRIMFileID(opaqueFieldDataList, mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vbios RIM file ID: %w", err)
 	}

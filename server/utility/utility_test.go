@@ -172,6 +172,30 @@ func TestDriverRIMFileID(t *testing.T) {
 	}
 }
 
+// testGPUVbiosVersion formats as "04.03.02.01.05" ("0403020105" in a RIM file ID).
+var testGPUVbiosVersion = []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+
+func vbiosRIMOpaqueData(project, projectSKU, chipSKU string, vbiosVersion []byte) []*pb.OpaqueFieldData {
+	return []*pb.OpaqueFieldData{
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(project)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(projectSKU)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(chipSKU)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION,
+			Data:     &pb.OpaqueFieldData_Value{Value: vbiosVersion},
+		},
+	}
+}
+
 func TestVbiosRIMFileID(t *testing.T) {
 	gpuReportProto, err := abi.RawAttestationReportToProto(testdata.RawGpuAttestationReportTestData.RawAttestationReport, abi.GPU)
 	if err != nil {
@@ -181,6 +205,7 @@ func TestVbiosRIMFileID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse switch attestation report: %v", err)
 	}
+	const wantCustomGPURIMID = "NV_GPU_VBIOS_G525_0220_886_0403020105"
 
 	tests := []struct {
 		name                string
@@ -195,6 +220,24 @@ func TestVbiosRIMFileID(t *testing.T) {
 			want:                "NV_GPU_VBIOS_1010_0200_882_96009F0001",
 		},
 		{
+			name:                "gpu_null_padded_fields",
+			opaqueFieldDataList: vbiosRIMOpaqueData("G525\x00\x00\x00", "0220\x00", "886\x00\x00", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
+		},
+		{
+			name:                "gpu_cuts_at_first_null",
+			opaqueFieldDataList: vbiosRIMOpaqueData("G525\x00trailing", "0220\x00extra", "886\x00ignored", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
+		},
+		{
+			name:                "gpu_lowercase_fields_uppercased",
+			opaqueFieldDataList: vbiosRIMOpaqueData("g525", "0220", "886", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
+		},
+		{
 			name:                "switch_mode",
 			opaqueFieldDataList: switchReportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData(),
 			mode:                abi.SWITCH,
@@ -204,40 +247,47 @@ func TestVbiosRIMFileID(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := vbiosRIMFileID(tc.opaqueFieldDataList, tc.mode)
+			got, err := VbiosRIMFileID(tc.opaqueFieldDataList, tc.mode)
 			if err != nil {
-				t.Fatalf("vbiosRIMFileID(%v, %v) failed: %v", tc.opaqueFieldDataList, tc.mode, err)
+				t.Fatalf("VbiosRIMFileID(%v, %v) failed: %v", tc.opaqueFieldDataList, tc.mode, err)
 			}
 			if got != tc.want {
-				t.Errorf("vbiosRIMFileID(%v, %v) = %q, want %q", tc.opaqueFieldDataList, tc.mode, got, tc.want)
+				t.Errorf("VbiosRIMFileID(%v, %v) = %q, want %q", tc.opaqueFieldDataList, tc.mode, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestVbiosRIMFileIDError(t *testing.T) {
-	vbiosVersion := func(value []byte) []*pb.OpaqueFieldData {
-		return []*pb.OpaqueFieldData{{
-			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION,
-			Data:     &pb.OpaqueFieldData_Value{Value: value},
-		}}
-	}
 	tests := []struct {
 		name                string
 		opaqueFieldDataList []*pb.OpaqueFieldData
 		mode                abi.AttestationType
 	}{
-		{name: "gpu_invalid_vbios_version_length", opaqueFieldDataList: vbiosVersion([]byte{0x01, 0x02, 0x03}), mode: abi.GPU},
+		{name: "gpu_invalid_vbios_version_length", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "886", []byte{0x01, 0x02, 0x03}), mode: abi.GPU},
 		{name: "gpu_missing_vbios_version", opaqueFieldDataList: nil, mode: abi.GPU},
-		{name: "unsupported_mode", opaqueFieldDataList: vbiosVersion([]byte{0x01, 0x02}), mode: abi.AttestationType(99)},
+		{name: "gpu_missing_project", opaqueFieldDataList: vbiosRIMOpaqueData("", "0220", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{name: "gpu_leading_null_project", opaqueFieldDataList: vbiosRIMOpaqueData("\x00G525", "0220", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{name: "gpu_missing_project_sku", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{name: "gpu_missing_chip_sku", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "", testGPUVbiosVersion), mode: abi.GPU},
+		{name: "unsupported_mode", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "886", []byte{0x01, 0x02}), mode: abi.AttestationType(99)},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, err := vbiosRIMFileID(tc.opaqueFieldDataList, tc.mode); err == nil {
-				t.Errorf("vbiosRIMFileID(%v, %v) = %q, want error", tc.opaqueFieldDataList, tc.mode, got)
+			if got, err := VbiosRIMFileID(tc.opaqueFieldDataList, tc.mode); err == nil {
+				t.Errorf("VbiosRIMFileID(%v, %v) = %q, want error", tc.opaqueFieldDataList, tc.mode, got)
 			}
 		})
+	}
+}
+
+func TestVbiosRIMFileIDUnsupportedModeErrorType(t *testing.T) {
+	mode := abi.AttestationType(99)
+	_, err := VbiosRIMFileID(vbiosRIMOpaqueData("G525", "0220", "886", []byte{0x01, 0x02}), mode)
+	var typeErr *abi.UnsupportedAttestationTypeError
+	if !errors.As(err, &typeErr) {
+		t.Errorf("VbiosRIMFileID(_, %v) error = %v, want *abi.UnsupportedAttestationTypeError", mode, err)
 	}
 }
 
