@@ -64,14 +64,15 @@ var (
 
 // Options holds configuration parameters needed for the verification process provided by the user.
 type Options struct {
-	AllowOCSPCertHold bool                // If true, the OCSP revocation reason `CertificateHold` is considered valid.
-	DisableRIMCheck   bool                // If true, skip RIM check for driver + vbios for GPU, and bios for switch.
-	DisableOCSPCheck  bool                // If true, skip OCSP check for certificate chain.
-	rimSchemaPath     string              // rimSchemaPath is the path to the RIM schema file that is used to validate the RIM XML file.
-	RimClient         rim.Client          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
-	OcspClient        nvattestocsp.Client // OCSP client to fetch OCSP responses for RIM and device certificate chains.
-	GpuOpts           GPUOpts             // GPU-specific configs for verifying GPU attestation.
-	SwitchOpts        SwitchOpts          // Switch-specific configs for verifying switch attestation.
+	AllowOCSPCertHold  bool                // If true, the OCSP revocation reason `CertificateHold` is considered valid.
+	DisableRIMCheck    bool                // If true, skip RIM check for driver + vbios for GPU, and bios for switch.
+	DisableOCSPCheck   bool                // If true, skip OCSP check for certificate chain.
+	DeviceRootCertPool *x509.CertPool      // Roots for device certificate and OCSP responder chains. If nil, defaults to cert.DeviceRootCertPool. An empty pool rejects all chains.
+	rimSchemaPath      string              // rimSchemaPath is the path to the RIM schema file that is used to validate the RIM XML file.
+	RimClient          rim.Client          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
+	OcspClient         nvattestocsp.Client // OCSP client to fetch OCSP responses for RIM and device certificate chains.
+	GpuOpts            GPUOpts             // GPU-specific configs for verifying GPU attestation.
+	SwitchOpts         SwitchOpts          // Switch-specific configs for verifying switch attestation.
 	// Now is a time set at which to verify the validity of certificate chains. If unset, uses defaultTimeset().
 	Now *TimeSet
 
@@ -106,6 +107,9 @@ func defaultTimeset() *TimeSet {
 }
 
 func setupOptions(opts *Options) {
+	if opts.DeviceRootCertPool == nil {
+		opts.DeviceRootCertPool = cert.DeviceRootCertPool
+	}
 	if opts.NewRimClient == nil {
 		opts.NewRimClient = rim.NewDefaultNvidiaClient
 	}
@@ -191,13 +195,13 @@ func GpuInfo(ctx context.Context, gpuInfo *pb.GpuInfo, opts Options) (*pb.GpuInf
 
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
 	attestationReportFWID := hex.EncodeToString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_FWID))
-	if err := opts.verifyGPUCertificateChain(certificateChain, cert.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
+	if err := opts.verifyGPUCertificateChain(certificateChain, opts.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
 		return nil, err
 	}
 	gpuInfoState.AttestationCertificateChain = gpuInfo.GetAttestationCertificateChain()
 
 	// 3. verify OCSP status for the certificate chain.
-	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, cert.DeviceRootCertPool, opts, verificationModeGPU, opts.Now.DeviceOCSPCertChain)
+	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, opts.DeviceRootCertPool, opts, verificationModeGPU, opts.Now.DeviceOCSPCertChain)
 	if ocspState != nil {
 		gpuInfoState.CertChainOcsp = ocspState
 	}
@@ -263,13 +267,13 @@ func SwitchInfo(ctx context.Context, switchInfo *pb.SwitchInfo, opts Options) (*
 
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
 	attestationReportFWID := hex.EncodeToString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_FWID))
-	if err := opts.verifySwitchCertificateChain(certificateChain, cert.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
+	if err := opts.verifySwitchCertificateChain(certificateChain, opts.DeviceRootCertPool, opts, attestationReportFWID); err != nil {
 		return nil, err
 	}
 	switchInfoState.AttestationCertificateChain = switchInfo.GetAttestationCertificateChain()
 
 	// 3. verify OCSP status for the certificate chain.
-	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, cert.DeviceRootCertPool, opts, verificationModeSwitch, opts.Now.DeviceOCSPCertChain)
+	ocspState, err := opts.verifyCertificateChainWithOCSP(ctx, certificateChain, opts.DeviceRootCertPool, opts, verificationModeSwitch, opts.Now.DeviceOCSPCertChain)
 	if ocspState != nil {
 		switchInfoState.CertChainOcsp = ocspState
 	}
