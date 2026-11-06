@@ -67,8 +67,7 @@ type Options struct {
 	AllowOCSPCertHold  bool                // If true, the OCSP revocation reason `CertificateHold` is considered valid.
 	DisableRIMCheck    bool                // If true, skip RIM check for driver + vbios for GPU, and bios for switch.
 	DisableOCSPCheck   bool                // If true, skip OCSP check for certificate chain.
-	DeviceRootCertPool *x509.CertPool      // DeviceRootCertPool defaults to cert.DeviceRootCertPool if nil.
-	RimRootCertPool    *x509.CertPool      // RimRootCertPool defaults to cert.RimRootCertPool if nil.
+	DeviceRootCertPool *x509.CertPool      // Roots for device certificate and OCSP responder chains. If nil, defaults to cert.DeviceRootCertPool. An empty pool rejects all chains.
 	rimSchemaPath      string              // rimSchemaPath is the path to the RIM schema file that is used to validate the RIM XML file.
 	RimClient          rim.Client          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
 	OcspClient         nvattestocsp.Client // OCSP client to fetch OCSP responses for RIM and device certificate chains.
@@ -110,9 +109,6 @@ func defaultTimeset() *TimeSet {
 func setupOptions(opts *Options) {
 	if opts.DeviceRootCertPool == nil {
 		opts.DeviceRootCertPool = cert.DeviceRootCertPool
-	}
-	if opts.RimRootCertPool == nil {
-		opts.RimRootCertPool = cert.RimRootCertPool
 	}
 	if opts.NewRimClient == nil {
 		opts.NewRimClient = rim.NewDefaultNvidiaClient
@@ -491,12 +487,12 @@ var defaultVerifyRIM = func(ctx context.Context, opts Options, rimData Evaluator
 
 	// 3. Validate the RIM Certificate Chain.
 	rimCertChain := rimData.CertificateChain()
-	if err := opts.verifyCertificateChain(opts.RimRootCertPool, rimCertChain, len(rimCertChain), opts.Now.RIMCertChain); err != nil {
+	if err := opts.verifyCertificateChain(cert.RimRootCertPool, rimCertChain, len(rimCertChain), opts.Now.RIMCertChain); err != nil {
 		return finalRimState, fmt.Errorf("%w: could not verify certificate chain: %v", ErrRimVerificationFailed, err)
 	}
 
 	// 4. Verify OCSP Status of the RIM Certificate Chain.
-	rimOcspState, err := opts.verifyCertificateChainWithOCSP(ctx, rimCertChain, opts.RimRootCertPool, opts, verificationModeRIM, opts.Now.RIMOCSPCertChain)
+	rimOcspState, err := opts.verifyCertificateChainWithOCSP(ctx, rimCertChain, cert.RimRootCertPool, opts, verificationModeRIM, opts.Now.RIMOCSPCertChain)
 	if err != nil {
 		if rimOcspState != nil {
 			finalRimState.CertChainOcsp = rimOcspState

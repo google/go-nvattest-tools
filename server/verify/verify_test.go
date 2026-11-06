@@ -1590,38 +1590,9 @@ func TestSetupOptionsDefaultDeviceRootCertPool(t *testing.T) {
 	}
 }
 
-func TestSetupOptionsDefaultRimRootCertPool(t *testing.T) {
-	opts := Options{}
-	setupOptions(&opts)
-
-	if opts.RimRootCertPool != cert.RimRootCertPool {
-		t.Errorf("RimRootCertPool = %p, want default %p", opts.RimRootCertPool, cert.RimRootCertPool)
-	}
-}
-
-func TestSetupOptionsPreservesCustomDeviceRootCertPool(t *testing.T) {
+func TestGpuInfoCustomDeviceRootCertPool(t *testing.T) {
 	customDevicePool := x509.NewCertPool()
-	opts := Options{DeviceRootCertPool: customDevicePool}
-	setupOptions(&opts)
-
-	if opts.DeviceRootCertPool != customDevicePool {
-		t.Errorf("DeviceRootCertPool = %p, want custom %p", opts.DeviceRootCertPool, customDevicePool)
-	}
-}
-
-func TestSetupOptionsPreservesCustomRimRootCertPool(t *testing.T) {
-	customRimPool := x509.NewCertPool()
-	opts := Options{RimRootCertPool: customRimPool}
-	setupOptions(&opts)
-
-	if opts.RimRootCertPool != customRimPool {
-		t.Errorf("RimRootCertPool = %p, want custom %p", opts.RimRootCertPool, customRimPool)
-	}
-}
-
-func TestGpuInfoCustomDeviceRootCertPoolForCertChain(t *testing.T) {
-	customDevicePool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
+	var capturedChainPool, capturedOCSPPool *x509.CertPool
 
 	gpuInfo := &pb.GpuInfo{
 		Uuid:                        "gpu-uuid-1",
@@ -1635,47 +1606,13 @@ func TestGpuInfoCustomDeviceRootCertPoolForCertChain(t *testing.T) {
 	opts := Options{
 		GpuOpts:            GPUOpts{GPUArch: pb.GpuArchitectureType_GPU_ARCHITECTURE_HOPPER},
 		DisableRIMCheck:    true,
-		DisableOCSPCheck:   true,
 		DeviceRootCertPool: customDevicePool,
 		verifyGPUCertificateChain: func(_ []*x509.Certificate, trustedRoots *x509.CertPool, _ Options, _ string) error {
-			capturedPool = trustedRoots
-			return nil
-		},
-		verifyAttestationReportSignature: func([]byte, *x509.Certificate, verificationMode) error {
-			return nil
-		},
-	}
-
-	if _, err := GpuInfo(t.Context(), gpuInfo, opts); err != nil {
-		t.Fatalf("GpuInfo() unexpected error: %v", err)
-	}
-	if capturedPool != customDevicePool {
-		t.Errorf("verifyGPUCertificateChain pool = %p, want custom pool %p", capturedPool, customDevicePool)
-	}
-}
-
-func TestGpuInfoCustomDeviceRootCertPoolForOCSP(t *testing.T) {
-	customDevicePool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
-
-	gpuInfo := &pb.GpuInfo{
-		Uuid:                        "gpu-uuid-1",
-		DriverVersion:               "driver-version-1",
-		VbiosVersion:                "vbios-version-1",
-		GpuArchitecture:             pb.GpuArchitectureType_GPU_ARCHITECTURE_HOPPER,
-		AttestationCertificateChain: td.GpuAttestationCertificateChain,
-		AttestationReport:           td.RawGpuAttestationReportTestData.RawAttestationReport,
-	}
-
-	opts := Options{
-		GpuOpts:            GPUOpts{GPUArch: pb.GpuArchitectureType_GPU_ARCHITECTURE_HOPPER},
-		DisableRIMCheck:    true,
-		DeviceRootCertPool: customDevicePool,
-		verifyGPUCertificateChain: func([]*x509.Certificate, *x509.CertPool, Options, string) error {
+			capturedChainPool = trustedRoots
 			return nil
 		},
 		verifyCertificateChainWithOCSP: func(_ context.Context, _ []*x509.Certificate, trustedRoots *x509.CertPool, _ Options, _ verificationMode, _ time.Time) (*pb.OcspState, error) {
-			capturedPool = trustedRoots
+			capturedOCSPPool = trustedRoots
 			return &pb.OcspState{OcspStatus: pb.OcspStatus_OCSP_STATUS_GOOD}, nil
 		},
 		verifyAttestationReportSignature: func([]byte, *x509.Certificate, verificationMode) error {
@@ -1686,14 +1623,17 @@ func TestGpuInfoCustomDeviceRootCertPoolForOCSP(t *testing.T) {
 	if _, err := GpuInfo(t.Context(), gpuInfo, opts); err != nil {
 		t.Fatalf("GpuInfo() unexpected error: %v", err)
 	}
-	if capturedPool != customDevicePool {
-		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedPool, customDevicePool)
+	if capturedChainPool != customDevicePool {
+		t.Errorf("verifyGPUCertificateChain pool = %p, want custom pool %p", capturedChainPool, customDevicePool)
+	}
+	if capturedOCSPPool != customDevicePool {
+		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedOCSPPool, customDevicePool)
 	}
 }
 
-func TestSwitchInfoCustomDeviceRootCertPoolForCertChain(t *testing.T) {
+func TestSwitchInfoCustomDeviceRootCertPool(t *testing.T) {
 	customDevicePool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
+	var capturedChainPool, capturedOCSPPool *x509.CertPool
 
 	switchInfo := &pb.SwitchInfo{
 		Uuid:                        "switch-uuid-1",
@@ -1703,43 +1643,13 @@ func TestSwitchInfoCustomDeviceRootCertPoolForCertChain(t *testing.T) {
 
 	opts := Options{
 		DisableRIMCheck:    true,
-		DisableOCSPCheck:   true,
 		DeviceRootCertPool: customDevicePool,
 		verifySwitchCertificateChain: func(_ []*x509.Certificate, trustedRoots *x509.CertPool, _ Options, _ string) error {
-			capturedPool = trustedRoots
-			return nil
-		},
-		verifyAttestationReportSignature: func([]byte, *x509.Certificate, verificationMode) error {
-			return nil
-		},
-	}
-
-	if _, err := SwitchInfo(t.Context(), switchInfo, opts); err != nil {
-		t.Fatalf("SwitchInfo() unexpected error: %v", err)
-	}
-	if capturedPool != customDevicePool {
-		t.Errorf("verifySwitchCertificateChain pool = %p, want custom pool %p", capturedPool, customDevicePool)
-	}
-}
-
-func TestSwitchInfoCustomDeviceRootCertPoolForOCSP(t *testing.T) {
-	customDevicePool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
-
-	switchInfo := &pb.SwitchInfo{
-		Uuid:                        "switch-uuid-1",
-		AttestationCertificateChain: td.SwitchAttestationCertificateChain,
-		AttestationReport:           td.RawSwitchAttestationReportTestData.RawAttestationReport,
-	}
-
-	opts := Options{
-		DisableRIMCheck:    true,
-		DeviceRootCertPool: customDevicePool,
-		verifySwitchCertificateChain: func([]*x509.Certificate, *x509.CertPool, Options, string) error {
+			capturedChainPool = trustedRoots
 			return nil
 		},
 		verifyCertificateChainWithOCSP: func(_ context.Context, _ []*x509.Certificate, trustedRoots *x509.CertPool, _ Options, _ verificationMode, _ time.Time) (*pb.OcspState, error) {
-			capturedPool = trustedRoots
+			capturedOCSPPool = trustedRoots
 			return &pb.OcspState{OcspStatus: pb.OcspStatus_OCSP_STATUS_GOOD}, nil
 		},
 		verifyAttestationReportSignature: func([]byte, *x509.Certificate, verificationMode) error {
@@ -1750,82 +1660,10 @@ func TestSwitchInfoCustomDeviceRootCertPoolForOCSP(t *testing.T) {
 	if _, err := SwitchInfo(t.Context(), switchInfo, opts); err != nil {
 		t.Fatalf("SwitchInfo() unexpected error: %v", err)
 	}
-	if capturedPool != customDevicePool {
-		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedPool, customDevicePool)
+	if capturedChainPool != customDevicePool {
+		t.Errorf("verifySwitchCertificateChain pool = %p, want custom pool %p", capturedChainPool, customDevicePool)
 	}
-}
-
-func TestVerifyRIMCustomRimRootCertPoolForCertChain(t *testing.T) {
-	customRimPool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
-
-	schemaPath := filepath.Join(t.TempDir(), "schema.xsd")
-	if err := os.WriteFile(schemaPath, []byte("<schema/>"), 0644); err != nil {
-		t.Fatalf("Failed to write schema file: %v", err)
-	}
-
-	opts := Options{
-		RimRootCertPool:  customRimPool,
-		DisableOCSPCheck: true,
-		rimSchemaPath:    schemaPath,
-		Now: &TimeSet{
-			RIMCertChain:     currentTime,
-			RIMOCSPCertChain: currentTime,
-		},
-		verifyCertificateChain: func(trustedRoots *x509.CertPool, _ []*x509.Certificate, _ int, _ time.Time, _ ...x509.ExtKeyUsage) error {
-			capturedPool = trustedRoots
-			return nil
-		},
-		verifyCertificateChainWithOCSP: defaultVerifyCertificateChainWithOCSP,
-	}
-
-	rimData := &test.MockRimData{
-		MockVersion:   "1.0",
-		MockCertChain: []*x509.Certificate{},
-	}
-
-	if _, err := defaultVerifyRIM(t.Context(), opts, rimData, "1.0"); err != nil {
-		t.Fatalf("defaultVerifyRIM() unexpected error: %v", err)
-	}
-	if capturedPool != customRimPool {
-		t.Errorf("verifyCertificateChain pool = %p, want custom pool %p", capturedPool, customRimPool)
-	}
-}
-
-func TestVerifyRIMCustomRimRootCertPoolForOCSP(t *testing.T) {
-	customRimPool := x509.NewCertPool()
-	var capturedPool *x509.CertPool
-
-	schemaPath := filepath.Join(t.TempDir(), "schema.xsd")
-	if err := os.WriteFile(schemaPath, []byte("<schema/>"), 0644); err != nil {
-		t.Fatalf("Failed to write schema file: %v", err)
-	}
-
-	opts := Options{
-		RimRootCertPool: customRimPool,
-		rimSchemaPath:   schemaPath,
-		Now: &TimeSet{
-			RIMCertChain:     currentTime,
-			RIMOCSPCertChain: currentTime,
-		},
-		verifyCertificateChain: func(*x509.CertPool, []*x509.Certificate, int, time.Time, ...x509.ExtKeyUsage) error {
-			return nil
-		},
-		verifyCertificateChainWithOCSP: func(_ context.Context, _ []*x509.Certificate, trustedRoots *x509.CertPool, _ Options, _ verificationMode, _ time.Time) (*pb.OcspState, error) {
-			capturedPool = trustedRoots
-			return &pb.OcspState{OcspStatus: pb.OcspStatus_OCSP_STATUS_GOOD}, nil
-		},
-	}
-
-	rimData := &test.MockRimData{
-		MockVersion:   "1.0",
-		MockCertChain: []*x509.Certificate{},
-	}
-
-	if _, err := defaultVerifyRIM(t.Context(), opts, rimData, "1.0"); err != nil {
-		t.Fatalf("defaultVerifyRIM() unexpected error: %v", err)
-	}
-	if capturedPool != customRimPool {
-		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedPool, customRimPool)
+	if capturedOCSPPool != customDevicePool {
+		t.Errorf("verifyCertificateChainWithOCSP pool = %p, want custom pool %p", capturedOCSPPool, customDevicePool)
 	}
 }
