@@ -61,8 +61,9 @@ func ValidateModes(quote *pb.GpuAttestationQuote, expectedMode string) error {
 	return nil
 }
 
-func normalizeOpaqueString(bytes []byte) string {
-	return strings.ToUpper(strings.Trim(strings.TrimSpace(string(bytes)), "\x00"))
+func normalizeOpaqueString(b []byte) string {
+	before, _, _ := bytes.Cut(b, []byte{0})
+	return strings.ToUpper(string(before))
 }
 
 func readFieldAsLittleEndian(data []byte) string {

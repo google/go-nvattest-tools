@@ -172,6 +172,27 @@ func TestDriverRIMFileID(t *testing.T) {
 	}
 }
 
+func vbiosRIMOpaqueData(project, projectSKU, chipSKU string, vbiosVersion []byte) []*pb.OpaqueFieldData {
+	return []*pb.OpaqueFieldData{
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(project)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(projectSKU)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte(chipSKU)},
+		},
+		{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION,
+			Data:     &pb.OpaqueFieldData_Value{Value: vbiosVersion},
+		},
+	}
+}
+
 func TestVbiosRIMFileID(t *testing.T) {
 	gpuReportProto, err := abi.RawAttestationReportToProto(testdata.RawGpuAttestationReportTestData.RawAttestationReport, abi.GPU)
 	if err != nil {
@@ -181,6 +202,8 @@ func TestVbiosRIMFileID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse switch attestation report: %v", err)
 	}
+	testGPUVbiosVersion := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+	const wantCustomGPURIMID = "NV_GPU_VBIOS_G525_0220_886_0403020105"
 
 	tests := []struct {
 		name                string
@@ -193,6 +216,30 @@ func TestVbiosRIMFileID(t *testing.T) {
 			opaqueFieldDataList: gpuReportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData(),
 			mode:                abi.GPU,
 			want:                "NV_GPU_VBIOS_1010_0200_882_96009F0001",
+		},
+		{
+			name:                "gpu_null_padded_fields",
+			opaqueFieldDataList: vbiosRIMOpaqueData("G525\x00\x00\x00", "0220\x00", "886\x00\x00", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
+		},
+		{
+			name:                "gpu_cuts_at_first_null",
+			opaqueFieldDataList: vbiosRIMOpaqueData("G525\x00trailing", "0220\x00extra", "886\x00ignored", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
+		},
+		{
+			name:                "gpu_leading_null",
+			opaqueFieldDataList: vbiosRIMOpaqueData("\x00G525", "0220", "886", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                "NV_GPU_VBIOS__0220_886_0403020105",
+		},
+		{
+			name:                "gpu_lowercase_fields_uppercased",
+			opaqueFieldDataList: vbiosRIMOpaqueData("g525", "0220", "886", testGPUVbiosVersion),
+			mode:                abi.GPU,
+			want:                wantCustomGPURIMID,
 		},
 		{
 			name:                "switch_mode",
