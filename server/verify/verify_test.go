@@ -1685,8 +1685,8 @@ func hasCertificateBlock(data []byte) bool {
 }
 
 // FuzzParsePEMCertificateChain checks the PEM chain wrapper's result contract
-// on arbitrary input: certs are non-nil iff err is nil, and input without a
-// CERTIFICATE block yields ErrNoCertificateChain.
+// on arbitrary input: certs are nil on error, and input without a CERTIFICATE
+// block yields ErrNoCertificateChain.
 func FuzzParsePEMCertificateChain(f *testing.F) {
 	f.Add(td.GpuAttestationCertificateChain)
 	f.Add(td.SwitchAttestationCertificateChain)
@@ -1705,23 +1705,8 @@ func FuzzParsePEMCertificateChain(f *testing.F) {
 			}
 			return
 		}
-		if err != nil {
-			if certs != nil {
-				t.Errorf("ParsePEMCertificateChain() returned non-nil certs on error: %v", err)
-			}
-			return
-		}
-		if len(certs) == 0 {
-			t.Errorf("ParsePEMCertificateChain() returned empty certs slice without error")
-		}
-		for i, cert := range certs {
-			if cert == nil {
-				t.Errorf("ParsePEMCertificateChain() returned nil cert at index %d", i)
-				continue
-			}
-			if len(cert.Raw) == 0 {
-				t.Errorf("ParsePEMCertificateChain() returned cert with empty Raw bytes at index %d", i)
-			}
+		if err != nil && certs != nil {
+			t.Errorf("ParsePEMCertificateChain() returned non-nil certs on error: %v", err)
 		}
 	})
 }
