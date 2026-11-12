@@ -204,12 +204,12 @@ func TestVbiosRIMFileID(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := vbiosRIMFileID(tc.opaqueFieldDataList, tc.mode)
+			got, err := VbiosRIMFileID(tc.opaqueFieldDataList, tc.mode)
 			if err != nil {
-				t.Fatalf("vbiosRIMFileID(%v, %v) failed: %v", tc.opaqueFieldDataList, tc.mode, err)
+				t.Fatalf("VbiosRIMFileID(%v, %v) failed: %v", tc.opaqueFieldDataList, tc.mode, err)
 			}
 			if got != tc.want {
-				t.Errorf("vbiosRIMFileID(%v, %v) = %q, want %q", tc.opaqueFieldDataList, tc.mode, got, tc.want)
+				t.Errorf("VbiosRIMFileID(%v, %v) = %q, want %q", tc.opaqueFieldDataList, tc.mode, got, tc.want)
 			}
 		})
 	}
@@ -234,10 +234,22 @@ func TestVbiosRIMFileIDError(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, err := vbiosRIMFileID(tc.opaqueFieldDataList, tc.mode); err == nil {
-				t.Errorf("vbiosRIMFileID(%v, %v) = %q, want error", tc.opaqueFieldDataList, tc.mode, got)
+			if got, err := VbiosRIMFileID(tc.opaqueFieldDataList, tc.mode); err == nil {
+				t.Errorf("VbiosRIMFileID(%v, %v) = %q, want error", tc.opaqueFieldDataList, tc.mode, got)
 			}
 		})
+	}
+}
+
+func TestVbiosRIMFileIDUnsupportedModeErrorType(t *testing.T) {
+	mode := abi.AttestationType(99)
+	_, err := VbiosRIMFileID([]*pb.OpaqueFieldData{{
+		DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION,
+		Data:     &pb.OpaqueFieldData_Value{Value: []byte{0x01, 0x02}},
+	}}, mode)
+	var typeErr *abi.UnsupportedAttestationTypeError
+	if !errors.As(err, &typeErr) {
+		t.Errorf("VbiosRIMFileID(_, %v) error = %v, want *abi.UnsupportedAttestationTypeError", mode, err)
 	}
 }
 

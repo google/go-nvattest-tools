@@ -144,9 +144,16 @@ func driverRIMFileID(driverVersion string, opaqueFieldDataList []*pb.OpaqueField
 	return prefix + driverVersion, nil
 }
 
-// vbiosRIMFileID returns the file ID for the VBIOS RIM (GPU and Switch).
-// reference to equivalent nvtrust library logic : https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
-func vbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
+// VbiosRIMFileID returns the file ID for the VBIOS RIM built from SPDM opaque data.
+// For abi.GPU, the result has the form
+// "NV_GPU_VBIOS_<PROJECT>_<PROJECT_SKU>_<CHIP_SKU>_<VBIOS_VERSION>"
+// (for example, "NV_GPU_VBIOS_1010_0200_882_96009F0001").
+// For abi.SWITCH, the result has the form
+// "NV_SWITCH_BIOS_5612_0002_890_<VBIOS_VERSION>".
+// It returns an error if the VBIOS version is invalid or if mode is unsupported
+// (*abi.UnsupportedAttestationTypeError).
+// Reference: https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
+func VbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
 	project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
 	projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
 	chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
@@ -191,7 +198,7 @@ var DriverRIMData = func(ctx context.Context, driverVersion string, reportProto 
 
 func vbiosRIMData(ctx context.Context, reportProto *pb.AttestationReport, rimClient rim.Client, mode abi.AttestationType) (*rim.Data, error) {
 	opaqueFieldDataList := reportProto.SpdmMeasurementResponse.GetOpaqueData().GetOpaqueFieldData()
-	fileID, err := vbiosRIMFileID(opaqueFieldDataList, mode)
+	fileID, err := VbiosRIMFileID(opaqueFieldDataList, mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vbios RIM file ID: %w", err)
 	}
