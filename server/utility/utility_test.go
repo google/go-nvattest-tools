@@ -172,6 +172,9 @@ func TestDriverRIMFileID(t *testing.T) {
 	}
 }
 
+// testGPUVbiosVersion formats as "04.03.02.01.05" ("0403020105" in a RIM file ID).
+var testGPUVbiosVersion = []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
+
 func vbiosRIMOpaqueData(project, projectSKU, chipSKU string, vbiosVersion []byte) []*pb.OpaqueFieldData {
 	return []*pb.OpaqueFieldData{
 		{
@@ -202,7 +205,6 @@ func TestVbiosRIMFileID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse switch attestation report: %v", err)
 	}
-	testGPUVbiosVersion := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
 	const wantCustomGPURIMID = "NV_GPU_VBIOS_G525_0220_886_0403020105"
 
 	tests := []struct {
@@ -228,12 +230,6 @@ func TestVbiosRIMFileID(t *testing.T) {
 			opaqueFieldDataList: vbiosRIMOpaqueData("G525\x00trailing", "0220\x00extra", "886\x00ignored", testGPUVbiosVersion),
 			mode:                abi.GPU,
 			want:                wantCustomGPURIMID,
-		},
-		{
-			name:                "gpu_leading_null",
-			opaqueFieldDataList: vbiosRIMOpaqueData("\x00G525", "0220", "886", testGPUVbiosVersion),
-			mode:                abi.GPU,
-			want:                "NV_GPU_VBIOS__0220_886_0403020105",
 		},
 		{
 			name:                "gpu_lowercase_fields_uppercased",
@@ -263,20 +259,45 @@ func TestVbiosRIMFileID(t *testing.T) {
 }
 
 func TestVbiosRIMFileIDError(t *testing.T) {
-	vbiosVersion := func(value []byte) []*pb.OpaqueFieldData {
-		return []*pb.OpaqueFieldData{{
-			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION,
-			Data:     &pb.OpaqueFieldData_Value{Value: value},
-		}}
-	}
 	tests := []struct {
 		name                string
 		opaqueFieldDataList []*pb.OpaqueFieldData
 		mode                abi.AttestationType
 	}{
-		{name: "gpu_invalid_vbios_version_length", opaqueFieldDataList: vbiosVersion([]byte{0x01, 0x02, 0x03}), mode: abi.GPU},
+		{name: "gpu_invalid_vbios_version_length", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "886", []byte{0x01, 0x02, 0x03}), mode: abi.GPU},
 		{name: "gpu_missing_vbios_version", opaqueFieldDataList: nil, mode: abi.GPU},
-		{name: "unsupported_mode", opaqueFieldDataList: vbiosVersion([]byte{0x01, 0x02}), mode: abi.AttestationType(99)},
+		{name: "gpu_empty_project", opaqueFieldDataList: vbiosRIMOpaqueData("", "0220", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{
+			name: "gpu_omitted_project",
+			opaqueFieldDataList: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU, Data: &pb.OpaqueFieldData_Value{Value: []byte("0220")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU, Data: &pb.OpaqueFieldData_Value{Value: []byte("886")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: testGPUVbiosVersion}},
+			},
+			mode: abi.GPU,
+		},
+		{name: "gpu_leading_null_project", opaqueFieldDataList: vbiosRIMOpaqueData("\x00G525", "0220", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{name: "gpu_empty_project_sku", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "", "886", testGPUVbiosVersion), mode: abi.GPU},
+		{
+			name: "gpu_omitted_project_sku",
+			opaqueFieldDataList: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT, Data: &pb.OpaqueFieldData_Value{Value: []byte("G525")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU, Data: &pb.OpaqueFieldData_Value{Value: []byte("886")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: testGPUVbiosVersion}},
+			},
+			mode: abi.GPU,
+		},
+		{name: "gpu_empty_chip_sku", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "", testGPUVbiosVersion), mode: abi.GPU},
+		{
+			name: "gpu_omitted_chip_sku",
+			opaqueFieldDataList: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT, Data: &pb.OpaqueFieldData_Value{Value: []byte("G525")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU, Data: &pb.OpaqueFieldData_Value{Value: []byte("0220")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: testGPUVbiosVersion}},
+			},
+			mode: abi.GPU,
+		},
+		{name: "unsupported_mode", opaqueFieldDataList: vbiosRIMOpaqueData("G525", "0220", "886", []byte{0x01, 0x02}), mode: abi.AttestationType(99)},
 	}
 
 	for _, tc := range tests {
