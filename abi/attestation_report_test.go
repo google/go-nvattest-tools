@@ -38,6 +38,9 @@ func FuzzRawAttestationReportToProto(f *testing.F) {
 		f.Add(isSwitch, td.RawAttestationReport[:SpdmRequestSize])
 		f.Add(isSwitch, td.RawAttestationReport[:SpdmRequestSize+SpdmMeasurementResponseHeaderSize])
 	}
+	for _, gpu := range testdata.MptAttestationDataSet.GpuAttestationQuote.GetGpuInfos() {
+		f.Add(false, gpu.GetAttestationReport())
+	}
 
 	f.Fuzz(func(t *testing.T, isSwitch bool, data []byte) {
 		at, _ := fixtureFor(isSwitch)
