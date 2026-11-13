@@ -146,18 +146,16 @@ func driverRIMFileID(driverVersion string, opaqueFieldDataList []*pb.OpaqueField
 }
 
 // VbiosRIMFileID returns the file ID for the VBIOS RIM built from SPDM opaque data.
-// For abi.GPU, the result has the form
+// For abi.GPU, opaqueFieldDataList must include non-empty project, project SKU, chip SKU,
+// and a valid VBIOS version, and the result has the form
 // "NV_GPU_VBIOS_<PROJECT>_<PROJECT_SKU>_<CHIP_SKU>_<VBIOS_VERSION>"
 // (for example, "NV_GPU_VBIOS_1010_0200_882_96009F0001").
 // For abi.SWITCH, the result has the form
 // "NV_SWITCH_BIOS_5612_0002_890_<VBIOS_VERSION>".
-// It returns an error if the VBIOS version is invalid or if mode is unsupported
-// (*abi.UnsupportedAttestationTypeError).
+// It returns an error if a required field is missing, if the VBIOS version is invalid,
+// or if mode is unsupported (*abi.UnsupportedAttestationTypeError).
 // Reference: https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/cc_admin_utils.py#L418
 func VbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.AttestationType) (string, error) {
-	project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
-	projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
-	chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
 	vbiosVersion, err := FormatVbiosVersion(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION), mode)
 	if err != nil {
 		return "", err
@@ -166,6 +164,18 @@ func VbiosRIMFileID(opaqueFieldDataList []*pb.OpaqueFieldData, mode abi.Attestat
 
 	switch mode {
 	case abi.GPU:
+		project := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT))
+		if project == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing project")
+		}
+		projectSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_PROJECT_SKU))
+		if projectSKU == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing project SKU")
+		}
+		chipSKU := normalizeOpaqueString(abi.ExtractOpaqueValue(opaqueFieldDataList, pb.OpaqueDataType_OPAQUE_FIELD_ID_CHIP_SKU))
+		if chipSKU == "" {
+			return "", fmt.Errorf("GPU attestation report opaque data is missing chip SKU")
+		}
 		return fmt.Sprintf("NV_GPU_VBIOS_%s_%s_%s_%s", project, projectSKU, chipSKU, vbiosVersionForID), nil
 	case abi.SWITCH:
 		// NV Switch doesn't have project, projectSKU and chipSKU fields and should be hardcoded.
