@@ -49,6 +49,13 @@ const (
 	serviceKeyHeader = "Authorization"
 	// serviceKeyValueFormat is the format string for the service key value in the Authorization header.
 	serviceKeyValueFormat = "Bearer %s" // Assuming "Bearer" token type
+
+	// OpaqueDataRIMIndexBase is the minimum measurement index in a RIM that represents an opaque data record.
+	OpaqueDataRIMIndexBase = 0x1000
+	// OpaqueDataRIMIndexMax is the maximum measurement index in a RIM that maps to a uint16 opaque field type ID.
+	OpaqueDataRIMIndexMax = OpaqueDataRIMIndexBase + 0xFFFF
+	// OpaqueDataNamespace is the XML namespace URI for RIM opaque data attributes (e.g., minSvn).
+	OpaqueDataNamespace = "https://docs.nvidia.com/attestation/specs/latest/opaque-data.html"
 )
 
 // Client is the interface for a client that fetches RIMs (Reference Integrity Manifests).
@@ -193,6 +200,14 @@ type GoldenMeasurement struct {
 	Active       bool
 }
 
+// OpaqueRecord represents an opaque data golden record extracted from the RIM (index >= 0x1000).
+type OpaqueRecord struct {
+	TypeID          uint16
+	Name            string
+	MinSVN          uint64
+	IncludeInResult bool
+}
+
 // Parse parses the RIM raw bytes into a Data struct.
 // reference to equivalent nvtrust library logic : https://github.com/NVIDIA/nvtrust/blob/main/guest_tools/gpu_verifiers/local_gpu_verifier/src/verifier/rim/__init__.py#L105
 func Parse(rimBytes []byte) (*Data, error) {
@@ -327,6 +342,10 @@ func (d *Data) Measurements(rimName, hashFunctionNamespace string) ([]GoldenMeas
 			return nil, fmt.Errorf("parsing index attribute in Payload tag: %w", err)
 		}
 
+		if index >= OpaqueDataRIMIndexBase {
+			continue
+		}
+
 		if _, exists := measurementsMap[index]; exists {
 			return nil, fmt.Errorf("invalid measurement index: multiple measurements have the same index %d", index)
 		}
@@ -390,6 +409,75 @@ func (d *Data) Measurements(rimName, hashFunctionNamespace string) ([]GoldenMeas
 		finalMeasurements = append(finalMeasurements, measurement)
 	}
 	return finalMeasurements, nil
+}
+
+// OpaqueRecords returns the active opaque data records (index >= 0x1000) from the RIM.
+func (d *Data) OpaqueRecords() ([]OpaqueRecord, error) {
+	if d == nil || d.root == nil {
+		return nil, nil
+	}
+	payload := d.root.FindElement("Payload")
+	if payload == nil {
+		return nil, fmt.Errorf("%w", ErrElementNotFound)
+	}
+
+	var records []OpaqueRecord
+	for _, child := range payload.ChildElements() {
+		indexStr := child.SelectAttrValue("index", "")
+		if indexStr == "" {
+			continue
+		}
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			return nil, fmt.Errorf("%w: parsing index attribute in Payload tag: %v", ErrRimSchemaValidationFailed, err)
+		}
+		if index < OpaqueDataRIMIndexBase {
+			continue
+		}
+		if index > OpaqueDataRIMIndexMax {
+			return nil, fmt.Errorf("%w: opaque data RIM record index %d exceeds max supported %d", ErrRimSchemaValidationFailed, index, OpaqueDataRIMIndexMax)
+		}
+
+		activeStr := child.SelectAttrValue("active", "false")
+		if activeStr != "True" && activeStr != "true" {
+			continue
+		}
+
+		var minSvnStr string
+		var hasMinSvn bool
+		var includeStr string
+		for _, attr := range child.Attr {
+			if attr.NamespaceURI() == OpaqueDataNamespace {
+				switch attr.Key {
+				case "minSvn":
+					minSvnStr = attr.Value
+					hasMinSvn = true
+				case "includeInResult":
+					includeStr = attr.Value
+				}
+			}
+		}
+		if !hasMinSvn {
+			return nil, fmt.Errorf("%w: opaque data RIM record at index %d lacks ns3:minSvn attribute", ErrRimSchemaValidationFailed, index)
+		}
+		minSvn, err := strconv.ParseUint(minSvnStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("%w: opaque data RIM record at index %d has invalid ns3:minSvn %q: %v", ErrRimSchemaValidationFailed, index, minSvnStr, err)
+		}
+
+		name := child.SelectAttrValue("name", "")
+		if name == "" {
+			return nil, fmt.Errorf("%w: opaque data RIM record at index %d lacks a name attribute", ErrRimSchemaValidationFailed, index)
+		}
+
+		records = append(records, OpaqueRecord{
+			TypeID:          uint16(index - OpaqueDataRIMIndexBase),
+			Name:            name,
+			MinSVN:          minSvn,
+			IncludeInResult: includeStr == "True",
+		})
+	}
+	return records, nil
 }
 
 // extractColloquialVersion extracts the colloquialVersion attribute from the Meta tag.

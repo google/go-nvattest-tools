@@ -17,6 +17,28 @@ func ExtractOpaqueValue(opaqueFieldDataList []*pb.OpaqueFieldData, dataType pb.O
 	return nil
 }
 
+// ExtractOpaqueFieldByRawType extracts the OpaqueFieldData matching the raw uint16 type ID.
+// For backward compatibility with manually constructed OpaqueFieldData messages that do not set
+// RawDataType, it also falls back to matching the mapped OpaqueDataType when RawDataType is 0.
+func ExtractOpaqueFieldByRawType(opaqueFieldDataList []*pb.OpaqueFieldData, rawDataType uint16) *pb.OpaqueFieldData {
+	mappedType, hasMapped := gpuOpaqueDataTypes[rawDataType]
+	for _, fieldData := range opaqueFieldDataList {
+		if rawDataType == 0 {
+			if fieldData.GetRawDataType() == 0 && fieldData.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_UNSPECIFIED {
+				return fieldData
+			}
+			continue
+		}
+		if fieldData.GetRawDataType() == uint32(rawDataType) {
+			return fieldData
+		}
+		if fieldData.GetRawDataType() == 0 && hasMapped && mappedType != pb.OpaqueDataType_OPAQUE_FIELD_ID_UNSPECIFIED && fieldData.GetDataType() == mappedType {
+			return fieldData
+		}
+	}
+	return nil
+}
+
 // clone makes a deep copy of a byte slice.
 func clone(b []byte) []byte {
 	result := make([]byte, len(b))

@@ -899,3 +899,90 @@ func TestListRIMs(t *testing.T) {
 		})
 	}
 }
+
+func parseTestRIMXML(t *testing.T, xmlStr string) *Data {
+	t.Helper()
+	doc := etree.NewDocument()
+	if err := doc.ReadFromString(xmlStr); err != nil {
+		t.Fatalf("failed to parse XML string: %v", err)
+	}
+	return &Data{root: doc.Root()}
+}
+
+func TestOpaqueRecordsAndMeasurementsSeparation(t *testing.T) {
+	t.Run("mixed_normal_and_opaque_records", func(t *testing.T) {
+		xmlStr := `<SoftwareIdentity xmlns:ns2="http://www.w3.org/2001/04/xmlenc#sha384" xmlns:ns3="https://docs.nvidia.com/attestation/specs/latest/opaque-data.html">
+			<Payload>
+				<Resource index="0" active="True" alternatives="1" size="48" name="Meas_0" ns2:Hash0="000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"/>
+				<Resource index="4096" active="True" name="OPAQUE_TYPE_0" ns3:minSvn="1" ns3:includeInResult="False"/>
+				<Resource index="4133" active="True" name="FSP_UCODE_SVN" ns3:minSvn="3" ns3:includeInResult="True"/>
+				<Resource index="4134" active="False" name="INACTIVE_SVN" ns3:minSvn="99" ns3:includeInResult="True"/>
+			</Payload>
+		</SoftwareIdentity>`
+		d := parseTestRIMXML(t, xmlStr)
+
+		measurements, err := d.Measurements("driver", hashFunctionNamespaceURI)
+		if err != nil {
+			t.Fatalf("Measurements() unexpected error: %v", err)
+		}
+		if len(measurements) != 1 || measurements[0].Index != 0 {
+			t.Errorf("Measurements() = %+v, want only index 0", measurements)
+		}
+
+		records, err := d.OpaqueRecords()
+		if err != nil {
+			t.Fatalf("OpaqueRecords() unexpected error: %v", err)
+		}
+		want := []OpaqueRecord{
+			{TypeID: 0, Name: "OPAQUE_TYPE_0", MinSVN: 1, IncludeInResult: false},
+			{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 3, IncludeInResult: true},
+		}
+		if diff := cmp.Diff(want, records); diff != "" {
+			t.Errorf("OpaqueRecords() diff (-want +got):\n%s", diff)
+		}
+	})
+
+	errorCases := []struct {
+		name       string
+		resourceEl string
+		wantErrMsg string
+	}{
+		{
+			name:       "index_exceeds_max",
+			resourceEl: `<Resource index="70000" active="True" name="TOO_LARGE" ns3:minSvn="1"/>`,
+			wantErrMsg: "exceeds max supported",
+		},
+		{
+			name:       "missing_min_svn",
+			resourceEl: `<Resource index="4133" active="True" name="FSP_UCODE_SVN"/>`,
+			wantErrMsg: "lacks ns3:minSvn attribute",
+		},
+		{
+			name:       "invalid_min_svn",
+			resourceEl: `<Resource index="4133" active="True" name="FSP_UCODE_SVN" ns3:minSvn="not_an_int"/>`,
+			wantErrMsg: "invalid ns3:minSvn",
+		},
+		{
+			name:       "missing_name",
+			resourceEl: `<Resource index="4133" active="True" ns3:minSvn="2"/>`,
+			wantErrMsg: "lacks a name attribute",
+		},
+	}
+
+	for _, tc := range errorCases {
+		t.Run(tc.name, func(t *testing.T) {
+			xmlStr := fmt.Sprintf(`<SoftwareIdentity xmlns:ns3="https://docs.nvidia.com/attestation/specs/latest/opaque-data.html"><Payload>%s</Payload></SoftwareIdentity>`, tc.resourceEl)
+			d := parseTestRIMXML(t, xmlStr)
+			_, err := d.OpaqueRecords()
+			if err == nil {
+				t.Fatalf("OpaqueRecords() succeeded, want error containing %q", tc.wantErrMsg)
+			}
+			if !errors.Is(err, ErrRimSchemaValidationFailed) {
+				t.Errorf("OpaqueRecords() err = %v, want to wrap ErrRimSchemaValidationFailed", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrMsg) {
+				t.Errorf("OpaqueRecords() err = %q, want substring %q", err.Error(), tc.wantErrMsg)
+			}
+		})
+	}
+}

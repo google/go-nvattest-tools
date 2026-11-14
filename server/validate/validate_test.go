@@ -822,3 +822,176 @@ func TestAttestationReport(t *testing.T) {
 		})
 	}
 }
+
+func TestDoOpaqueRecordsMatch(t *testing.T) {
+	makeReportWithOpaqueFields := func(fields []*pb.OpaqueFieldData) *pb.AttestationReport {
+		return &pb.AttestationReport{
+			SpdmMeasurementResponse: &pb.SpdmMeasurementResponse{
+				OpaqueData: &pb.OpaqueData{
+					FormatVersion:   &pb.OpaqueDataFormatVersion{Major: 2, Minor: 0, HasHeader: true},
+					OpaqueFieldData: fields,
+				},
+			},
+		}
+	}
+
+	testCases := []struct {
+		name         string
+		driverOpaque []rim.OpaqueRecord
+		vbiosOpaque  []rim.OpaqueRecord
+		reportFields []*pb.OpaqueFieldData
+		wantErr      error
+	}{
+		{
+			name:    "no_golden_opaque_records",
+			wantErr: nil,
+		},
+		{
+			name: "min_svn_equal_and_greater_pass",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 3, IncludeInResult: true},
+			},
+			vbiosOpaque: []rim.OpaqueRecord{
+				{TypeID: 38, Name: "SEC2_UCODE_SVN", MinSVN: 2, IncludeInResult: false},
+			},
+			reportFields: []*pb.OpaqueFieldData{
+				{
+					RawDataType: 37,
+					ValueType:   abi.MinSvnOpaqueValueType,
+					Data:        &pb.OpaqueFieldData_Value{Value: []byte{0x03, 0x00}},
+				},
+				{
+					RawDataType: 38,
+					ValueType:   abi.MinSvnOpaqueValueType,
+					Data:        &pb.OpaqueFieldData_Value{Value: []byte{0x05, 0x00}},
+				},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "min_svn_below_floor_fails",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 3, IncludeInResult: true},
+			},
+			reportFields: []*pb.OpaqueFieldData{
+				{
+					RawDataType: 37,
+					ValueType:   abi.MinSvnOpaqueValueType,
+					Data:        &pb.OpaqueFieldData_Value{Value: []byte{0x02, 0x00}},
+				},
+			},
+			wantErr: &MismatchedOpaqueRecordsError{
+				mismatchedRecords: []mismatchedOpaqueRecord{
+					{
+						typeID:       37,
+						name:         "FSP_UCODE_SVN",
+						expectedSvn:  3,
+						runtimeValue: []byte{0x02, 0x00},
+						reason:       "runtime SVN 2 is less than minimum SVN 3",
+					},
+				},
+			},
+		},
+		{
+			name: "missing_runtime_field_fails",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 1, IncludeInResult: true},
+			},
+			reportFields: nil,
+			wantErr: &MismatchedOpaqueRecordsError{
+				mismatchedRecords: []mismatchedOpaqueRecord{
+					{
+						typeID:      37,
+						name:        "FSP_UCODE_SVN",
+						expectedSvn: 1,
+						reason:      "missing in attestation report",
+					},
+				},
+			},
+		},
+		{
+			name: "wrong_value_type_fails",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 1, IncludeInResult: true},
+			},
+			reportFields: []*pb.OpaqueFieldData{
+				{
+					RawDataType: 37,
+					ValueType:   0x0086,
+					Data:        &pb.OpaqueFieldData_Value{Value: []byte{0x05, 0x00}},
+				},
+			},
+			wantErr: &MismatchedOpaqueRecordsError{
+				mismatchedRecords: []mismatchedOpaqueRecord{
+					{
+						typeID:       37,
+						name:         "FSP_UCODE_SVN",
+						expectedSvn:  1,
+						runtimeValue: []byte{0x05, 0x00},
+						reason:       "unexpected value type 0x86 (want 0x87)",
+					},
+				},
+			},
+		},
+		{
+			name: "wrong_value_length_fails",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 1, IncludeInResult: true},
+			},
+			reportFields: []*pb.OpaqueFieldData{
+				{
+					RawDataType: 37,
+					ValueType:   abi.MinSvnOpaqueValueType,
+					Data:        &pb.OpaqueFieldData_Value{Value: []byte{0x05}},
+				},
+			},
+			wantErr: &MismatchedOpaqueRecordsError{
+				mismatchedRecords: []mismatchedOpaqueRecord{
+					{
+						typeID:       37,
+						name:         "FSP_UCODE_SVN",
+						expectedSvn:  1,
+						runtimeValue: []byte{0x05},
+						reason:       "unexpected value length 1 (want 2)",
+					},
+				},
+			},
+		},
+		{
+			name: "conflicting_type_id_between_driver_and_vbios",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 1},
+			},
+			vbiosOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "OTHER_SVN", MinSVN: 1},
+			},
+			wantErr: &OpaqueRecordConflictError{typeID: 37, name: "OTHER_SVN"},
+		},
+		{
+			name: "conflicting_name_between_driver_and_vbios",
+			driverOpaque: []rim.OpaqueRecord{
+				{TypeID: 37, Name: "FSP_UCODE_SVN", MinSVN: 1},
+			},
+			vbiosOpaque: []rim.OpaqueRecord{
+				{TypeID: 38, Name: "FSP_UCODE_SVN", MinSVN: 1},
+			},
+			wantErr: &OpaqueRecordConflictError{typeID: 38, name: "FSP_UCODE_SVN"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{
+				AttestationType: abi.GPU,
+				goldenOpaqueRecords: map[RimType][]rim.OpaqueRecord{
+					Driver: tc.driverOpaque,
+					VBios:  tc.vbiosOpaque,
+				},
+			}
+			got := doOpaqueRecordsMatch(makeReportWithOpaqueFields(tc.reportFields), opts)
+			if diff := cmp.Diff(tc.wantErr, got, cmp.AllowUnexported(MismatchedOpaqueRecordsError{}, mismatchedOpaqueRecord{}, OpaqueRecordConflictError{})); diff != "" {
+				t.Errorf("doOpaqueRecordsMatch() diff (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

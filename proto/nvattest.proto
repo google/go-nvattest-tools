@@ -189,6 +189,17 @@ message DmtfMeasurement {
   bytes value = 3;
 }
 
+// OpaqueDataFormatVersion represents the format version extracted from the
+// SPDM Opaque Data ("NVDAOD") header when present.
+message OpaqueDataFormatVersion {
+  // The major version of the opaque data format.
+  uint32 major = 1;
+  // The minor version of the opaque data format.
+  uint32 minor = 2;
+  // True if the opaque data starts with the "NVDAOD" header.
+  bool has_header = 3;
+}
+
 // Opaque Data refers to data structures or interfaces where the internal
 // implementation or data layout is hidden from the user. It primarily includes
 // information such as driver/vbios version, gpu info, board id, project sku,
@@ -196,6 +207,8 @@ message DmtfMeasurement {
 message OpaqueData {
   // A list of opaque field data.
   repeated OpaqueFieldData opaque_field_data = 1;
+  // Format version parsed from the "NVDAOD" header, if present.
+  OpaqueDataFormatVersion format_version = 2;
 }
 
 // OpaqueFieldData contains the data type and the value of the opaque field.
@@ -210,6 +223,10 @@ message OpaqueFieldData {
     SwitchTopology switch_topology = 5;
     bytes value = 6;
   }
+  // The 2-byte rmDataValueType from the NVDAOD TLV entry (0 for legacy format).
+  uint32 value_type = 7;
+  // The raw 2-byte data type ID from the TLV entry.
+  uint32 raw_data_type = 8;
 }
 
 // MsrCounts contains a list of measurement count values from the OpaqueData
