@@ -24,6 +24,7 @@ func main() {
 
 	subcommands.Register(&collectCmd{}, "")
 	subcommands.Register(&attestCmd{}, "")
+	subcommands.Register(&versionCmd{}, "")
 
 	flag.Parse()
 	ctx := context.Background()
