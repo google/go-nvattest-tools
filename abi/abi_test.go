@@ -86,6 +86,12 @@ func TestAttestationReportToProto(t *testing.T) {
 			wantErr:         &IncorrectLengthError{Context: "spdm measurement response header", Expected: SpdmMeasurementResponseHeaderSize, Actual: 0},
 		},
 		{
+			name:            "invalid_attestation_report_spdm_measurement_response_length_switch",
+			data:            testdata.RawSwitchAttestationReportTestData.RawAttestationReport[:SpdmRequestSize],
+			attestationType: SWITCH,
+			wantErr:         &IncorrectLengthError{Context: "spdm measurement response header", Expected: SpdmMeasurementResponseHeaderSize, Actual: 0},
+		},
+		{
 			name:            "unsupported_attestation_type",
 			data:            testdata.RawGpuAttestationReportTestData.RawAttestationReport,
 			attestationType: -1,
@@ -195,6 +201,13 @@ func TestParseSpdmMeasurementResponse(t *testing.T) {
 			opaqueDataParser: &gpuOpaqueDataParser{},
 			signatureLength:  GpuAttestationReportSignatureFieldSize,
 			wantErr:          &IncorrectLengthError{Context: "opaque data", Expected: testdata.RawGpuAttestationReportTestData.OpaqueDataLength, Actual: 0},
+		},
+		{
+			name:             "truncated_signature_in_spdm_measurement_response_gpu",
+			data:             testdata.RawGpuAttestationReportTestData.RawAttestationReport[SpdmRequestSize : SpdmRequestSize+testdata.RawGpuAttestationReportTestData.OpaqueDataOffset+testdata.RawGpuAttestationReportTestData.OpaqueDataLength],
+			opaqueDataParser: &gpuOpaqueDataParser{},
+			signatureLength:  GpuAttestationReportSignatureFieldSize,
+			wantErr:          &IncorrectLengthError{Context: "signature", Expected: GpuAttestationReportSignatureFieldSize, Actual: 0},
 		},
 		{
 			name:             "valid_spdm_measurement_response_switch",
@@ -434,6 +447,13 @@ func TestParseOpaqueData(t *testing.T) {
 		{
 			name:       "invalid_measurement_counts_gpu",
 			parser:     &gpuOpaqueDataParser{},
+			data:       []byte{12, 0, OpaqueDataMsrCountSize - 1, 0, 0, 0, 0},
+			dataLength: 7,
+			wantErr:    &InvalidSizeMeasurementCountsError{Expected: OpaqueDataMsrCountSize, Actual: OpaqueDataMsrCountSize - 1},
+		},
+		{
+			name:       "invalid_measurement_counts_switch",
+			parser:     &switchOpaqueDataParser{},
 			data:       []byte{12, 0, OpaqueDataMsrCountSize - 1, 0, 0, 0, 0},
 			dataLength: 7,
 			wantErr:    &InvalidSizeMeasurementCountsError{Expected: OpaqueDataMsrCountSize, Actual: OpaqueDataMsrCountSize - 1},
