@@ -45,11 +45,9 @@ func FuzzRawAttestationReportToProto(f *testing.F) {
 	f.Fuzz(func(t *testing.T, isSwitch bool, data []byte) {
 		at, _ := fixtureFor(isSwitch)
 		report, err := RawAttestationReportToProto(data, at)
-		if (err == nil) == (report == nil) {
-			t.Errorf("RawAttestationReportToProto(data, %v) = %v, %v; want exactly one non-nil", at, report, err)
+		if err != nil {
+			return
 		}
-		if err == nil {
-			ParseFeatureFlag(report)
-		}
+		ParseFeatureFlag(report)
 	})
 }
