@@ -16,6 +16,45 @@ GPUs and NVSwitch Configuration and Query (NSCQ) library for NVSwitches.
 This means `libnvidia-ml.so` and `libnvidia-nscq.so` must be available in the
 library path at runtime.
 
+## Installation
+
+### Command-line tool (`nvattest`)
+
+Pre-built binaries for `linux/amd64` and `linux/arm64` are attached to every
+[release](https://github.com/google/go-nvattest-tools/releases), so the CLI can
+be used without a Go toolchain or a build environment:
+
+```bash
+VERSION=v0.1.0
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
+curl -fsSLO "https://github.com/google/go-nvattest-tools/releases/download/${VERSION}/nvattest_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/google/go-nvattest-tools/releases/download/${VERSION}/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS
+
+tar -xzf "nvattest_${VERSION}_linux_${ARCH}.tar.gz"
+sudo install -m 0755 "nvattest_${VERSION}_linux_${ARCH}/nvattest" /usr/local/bin/nvattest
+```
+
+libxml2 is linked statically into these binaries, and they are built against
+glibc 2.28 (RHEL/Rocky/AlmaLinux 8+, Ubuntu 20.04+, Debian 11+). The NVIDIA
+libraries are still loaded from the system at runtime. See
+[cmd/nvattest/README.md](cmd/nvattest/README.md) for usage, and
+[RELEASING.md](RELEASING.md) for how the binaries are produced.
+
+### Go libraries
+
+Nothing changes for code that imports the `client`, `spt`, `mpt` or `ppcie`
+packages directly:
+
+```bash
+go get github.com/google/go-nvattest-tools@latest
+```
+
+Note that `server/rim` validates RIM XML through cgo bindings to libxml2, so a C
+compiler and the libxml2 development headers (`libxml2-dev` on Debian/Ubuntu,
+`libxml2-devel` on RHEL-like distributions) must be present at build time.
+
 ## Packages
 
 ### `client`

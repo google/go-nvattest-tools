@@ -8,6 +8,7 @@ The CLI follows a subcommand-based interface to separate the retrieval of device
 
 * `collect-evidence`: Retrieves attestation quotes from live hardware.
 * `attest`: Verifies device attestation evidence (either collected live or loaded from a file) against Reference Integrity Manifests (RIMs) and certificate status (OCSP/CRL).
+* `version`: Prints the version and build information of the binary.
 
 ## Prerequisites
 
@@ -22,12 +23,54 @@ To run `nvattest`, the system must meet the following requirements:
 * **NSCQ Compatibility:** The `libnvidia-nscq` library version must match the major version of the installed NVIDIA driver (e.g., `libnvidia-nscq-535` for R535 driver).
 * **Privileges:** Accessing NVML/NSCQ for attestation quote collection on Linux typically requires root privileges (e.g., running with `sudo`).
 
-## Building
+## Installation
 
-To build the `nvattest` binary using standard Go tooling:
+### Pre-built binaries (recommended)
+
+Each [release](https://github.com/google/go-nvattest-tools/releases) ships
+ready-to-run `nvattest` binaries for `linux/amd64` and `linux/arm64`, so no Go
+toolchain or build environment is needed on the target machine:
+
+```bash
+VERSION=v0.1.0
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
+curl -fsSLO "https://github.com/google/go-nvattest-tools/releases/download/${VERSION}/nvattest_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/google/go-nvattest-tools/releases/download/${VERSION}/SHA256SUMS"
+
+# Verify the download before running it.
+sha256sum --ignore-missing -c SHA256SUMS
+
+tar -xzf "nvattest_${VERSION}_linux_${ARCH}.tar.gz"
+sudo install -m 0755 "nvattest_${VERSION}_linux_${ARCH}/nvattest" /usr/local/bin/nvattest
+
+nvattest version
+```
+
+The released binaries link libxml2 statically, so libxml2 does not have to be
+installed. They are built against glibc 2.28, which covers RHEL/Rocky/AlmaLinux
+8+, Ubuntu 20.04+ and Debian 11+. The NVIDIA libraries (`libnvidia-ml.so`,
+`libnvidia-nscq.so`) are still loaded from the system at runtime, as described
+in [Prerequisites](#prerequisites); they are not bundled.
+
+Binaries are published for Linux only, which is the only platform where
+attestation evidence can be collected from NVIDIA devices.
+
+### Building from source
+
+To build the `nvattest` binary using standard Go tooling (requires a C compiler
+and `libxml2-dev` / `libxml2-devel`, since the RIM schema validation uses cgo
+bindings to libxml2):
 
 ```bash
 go build -o nvattest .
+```
+
+To reproduce a release build locally — static libxml2, tarball and checksum in
+`dist/` — run the release script on a Linux host of the target architecture:
+
+```bash
+./scripts/build-release.sh
 ```
 
 ## Subcommands
@@ -94,6 +137,16 @@ sudo ./nvattest attest \
   --rims_file=rims.textproto \
   --rims_ocsp_file=rims_ocsp.textproto \
   --device_ocsp_file=device_ocsp.textproto
+```
+
+### `version`
+
+Prints the version, commit and build date stamped into the binary, plus the Go
+version and platform it was built for. Useful when reporting issues against a
+pre-built binary.
+
+```bash
+./nvattest version
 ```
 
 ## Troubleshooting & Notes
