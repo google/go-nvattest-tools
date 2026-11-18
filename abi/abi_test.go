@@ -86,6 +86,12 @@ func TestAttestationReportToProto(t *testing.T) {
 			wantErr:         &IncorrectLengthError{Context: "spdm measurement response header", Expected: SpdmMeasurementResponseHeaderSize, Actual: 0},
 		},
 		{
+			name:            "invalid_attestation_report_spdm_measurement_response_length_switch",
+			data:            testdata.RawSwitchAttestationReportTestData.RawAttestationReport[:SpdmRequestSize+SpdmMeasurementResponseHeaderSize-1],
+			attestationType: SWITCH,
+			wantErr:         &IncorrectLengthError{Context: "spdm measurement response header", Expected: SpdmMeasurementResponseHeaderSize, Actual: SpdmMeasurementResponseHeaderSize - 1},
+		},
+		{
 			name:            "unsupported_attestation_type",
 			data:            testdata.RawGpuAttestationReportTestData.RawAttestationReport,
 			attestationType: -1,
@@ -195,6 +201,20 @@ func TestParseSpdmMeasurementResponse(t *testing.T) {
 			opaqueDataParser: &gpuOpaqueDataParser{},
 			signatureLength:  GpuAttestationReportSignatureFieldSize,
 			wantErr:          &IncorrectLengthError{Context: "opaque data", Expected: testdata.RawGpuAttestationReportTestData.OpaqueDataLength, Actual: 0},
+		},
+		{
+			name:             "truncated_opaque_length_in_spdm_measurement_response_gpu",
+			data:             testdata.RawGpuAttestationReportTestData.RawAttestationReport[SpdmRequestSize : SpdmRequestSize+testdata.RawGpuAttestationReportTestData.OpaqueDataOffset-1],
+			opaqueDataParser: &gpuOpaqueDataParser{},
+			signatureLength:  GpuAttestationReportSignatureFieldSize,
+			wantErr:          &IncorrectLengthError{Context: "opaque length", Expected: OpaqueLengthFieldSize, Actual: 1},
+		},
+		{
+			name:             "truncated_signature_in_spdm_measurement_response_gpu",
+			data:             testdata.RawGpuAttestationReportTestData.RawAttestationReport[SpdmRequestSize : SpdmRequestSize+testdata.RawGpuAttestationReportTestData.OpaqueDataOffset+testdata.RawGpuAttestationReportTestData.OpaqueDataLength+GpuAttestationReportSignatureFieldSize-1],
+			opaqueDataParser: &gpuOpaqueDataParser{},
+			signatureLength:  GpuAttestationReportSignatureFieldSize,
+			wantErr:          &IncorrectLengthError{Context: "signature", Expected: GpuAttestationReportSignatureFieldSize, Actual: GpuAttestationReportSignatureFieldSize - 1},
 		},
 		{
 			name:             "valid_spdm_measurement_response_switch",
@@ -437,6 +457,13 @@ func TestParseOpaqueData(t *testing.T) {
 			data:       []byte{12, 0, OpaqueDataMsrCountSize - 1, 0, 0, 0, 0},
 			dataLength: 7,
 			wantErr:    &InvalidSizeMeasurementCountsError{Expected: OpaqueDataMsrCountSize, Actual: OpaqueDataMsrCountSize - 1},
+		},
+		{
+			name:       "invalid_measurement_counts_switch",
+			parser:     &switchOpaqueDataParser{},
+			data:       []byte{12, 0, OpaqueDataMsrCountSize + 1, 0, 0, 0, 0, 0, 0},
+			dataLength: 9,
+			wantErr:    &InvalidSizeMeasurementCountsError{Expected: OpaqueDataMsrCountSize, Actual: OpaqueDataMsrCountSize + 1},
 		},
 		{
 			name:       "invalid_switch_pdis_gpu",
