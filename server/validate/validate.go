@@ -81,6 +81,21 @@ func runtimeMeasurements(measurementBlocks []*pb.MeasurementBlock) map[int]strin
 	return measurementsMap
 }
 
+// reportVersions returns the driver and VBIOS versions from the opaque fields of an attestation
+// report. It reads the first field of each type, the same as RIM lookup and verification. It
+// returns an empty string for a field that is not present.
+func reportVersions(ofds []*pb.OpaqueFieldData, attestationType abi.AttestationType) (driverVersion, vbiosVersion string, err error) {
+	// If present, remove the trailing null byte from the driver version.
+	driverVersion = string(bytes.TrimSuffix(abi.ExtractOpaqueValue(ofds, pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION), []byte{0x00}))
+	if rawVbiosVersion := abi.ExtractOpaqueValue(ofds, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION); rawVbiosVersion != nil {
+		vbiosVersion, err = utility.FormatVbiosVersion(rawVbiosVersion, attestationType)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return driverVersion, vbiosVersion, nil
+}
+
 // AttestationReport validates runtime measurements in the attestation report against the golden measurements.
 func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts Options) error {
 	if opts.parseAttestationReport == nil {
@@ -100,20 +115,9 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	}
 
 	ofds := attestationReport.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData()
-	var driverVersion string
-	var vbiosVersion string
-
-	for _, ofd := range ofds {
-		if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION {
-			// If present, remove the trailing null byte from the driver version.
-			driverVersion = string(bytes.TrimSuffix(ofd.GetValue(), []byte{0x00}))
-		}
-		if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION {
-			vbiosVersion, err = utility.FormatVbiosVersion(ofd.GetValue(), opts.AttestationType)
-			if err != nil {
-				return err
-			}
-		}
+	driverVersion, vbiosVersion, err := reportVersions(ofds, opts.AttestationType)
+	if err != nil {
+		return err
 	}
 
 	if opts.AttestationType == abi.GPU && driverVersion != opts.DriverVersion {
