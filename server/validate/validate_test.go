@@ -3,6 +3,7 @@ package validate
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -818,6 +819,195 @@ func TestAttestationReport(t *testing.T) {
 			}
 			if defaultRimClientCallCount != tc.wantDefaultRIMClientCalls {
 				t.Errorf("AttestationReport() defaultRimClient call count mismatch: got %d, want %d", defaultRimClientCallCount, tc.wantDefaultRIMClientCalls)
+			}
+		})
+	}
+}
+
+func TestAttestationReportReadsFirstOpaqueField(t *testing.T) {
+	nonce := []byte("test-nonce")
+	testcases := []struct {
+		name            string
+		attestationType abi.AttestationType
+		driverVersion   string
+		vbiosVersion    string
+		ofds            []*pb.OpaqueFieldData
+		wantErr         error
+	}{
+		{
+			name:            "driver_version_gpu",
+			attestationType: abi.GPU,
+			driverVersion:   "535.104.05",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("999.99.99")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("535.104.05")}},
+			},
+			wantErr: &DriverVersionMismatchError{actual: "999.99.99", expected: "535.104.05"},
+		},
+		{
+			name:            "driver_version_ignores_second_copy_gpu",
+			attestationType: abi.GPU,
+			driverVersion:   "535.104.05",
+			vbiosVersion:    "04.03.02.01.05",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("535.104.05")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("999.99.99")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}}},
+			},
+			wantErr: nil,
+		},
+		{
+			name:            "vbios_version_gpu",
+			attestationType: abi.GPU,
+			driverVersion:   "535.104.05",
+			vbiosVersion:    "04.03.02.01.05",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("535.104.05")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18}}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}}},
+			},
+			wantErr: &VBiosVersionMismatchError{actual: "14.13.12.11.15", expected: "04.03.02.01.05"},
+		},
+		{
+			name:            "vbios_version_ignores_malformed_second_copy_gpu",
+			attestationType: abi.GPU,
+			driverVersion:   "535.104.05",
+			vbiosVersion:    "04.03.02.01.05",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("535.104.05")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x01}}},
+			},
+			wantErr: nil,
+		},
+		{
+			name:            "vbios_version_switch",
+			attestationType: abi.SWITCH,
+			vbiosVersion:    "96.10.6D.00.01",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("99.99.99.99.99")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("96.10.6D.00.01")}},
+			},
+			wantErr: &VBiosVersionMismatchError{actual: "99.99.99.99.99", expected: "96.10.6D.00.01"},
+		},
+		{
+			name:            "vbios_version_ignores_second_copy_switch",
+			attestationType: abi.SWITCH,
+			vbiosVersion:    "96.10.6D.00.01",
+			ofds: []*pb.OpaqueFieldData{
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("96.10.6D.00.01")}},
+				{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte("99.99.99.99.99")}},
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			report := &pb.AttestationReport{
+				SpdmMeasurementRequest:  &pb.SpdmMeasurementRequest{Nonce: nonce},
+				SpdmMeasurementResponse: &pb.SpdmMeasurementResponse{OpaqueData: &pb.OpaqueData{OpaqueFieldData: tc.ofds}},
+			}
+			got := AttestationReport(t.Context(), nil, Options{
+				Nonce:           nonce,
+				DriverVersion:   tc.driverVersion,
+				VBiosVersion:    tc.vbiosVersion,
+				AttestationType: tc.attestationType,
+				DisableRefCheck: true,
+				parseAttestationReport: func([]byte, abi.AttestationType) (*pb.AttestationReport, error) {
+					return report, nil
+				},
+			})
+			if diff := cmp.Diff(tc.wantErr, got, cmp.AllowUnexported(DriverVersionMismatchError{}, VBiosVersionMismatchError{})); diff != "" {
+				t.Errorf("AttestationReport() with opaque fields %v error mismatch (-want +got):\n%s", tc.ofds, diff)
+			}
+		})
+	}
+}
+
+func TestAttestationReportMalformedVBIOSVersion(t *testing.T) {
+	nonce := []byte("test-nonce")
+	const driverVersion = "535.104.05"
+	report := &pb.AttestationReport{
+		SpdmMeasurementRequest: &pb.SpdmMeasurementRequest{Nonce: nonce},
+		SpdmMeasurementResponse: &pb.SpdmMeasurementResponse{OpaqueData: &pb.OpaqueData{OpaqueFieldData: []*pb.OpaqueFieldData{
+			{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte(driverVersion)}},
+			{DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION, Data: &pb.OpaqueFieldData_Value{Value: []byte{0x01}}},
+		}}},
+	}
+
+	err := AttestationReport(t.Context(), nil, Options{
+		Nonce:           nonce,
+		DriverVersion:   driverVersion,
+		VBiosVersion:    "96.00.9F.00.01",
+		AttestationType: abi.GPU,
+		DisableRefCheck: true,
+		parseAttestationReport: func([]byte, abi.AttestationType) (*pb.AttestationReport, error) {
+			return report, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("AttestationReport() with a 1-byte GPU VBIOS version succeeded, want error")
+	}
+	var vbiosMismatchErr *VBiosVersionMismatchError
+	var driverMismatchErr *DriverVersionMismatchError
+	if errors.As(err, &vbiosMismatchErr) || errors.As(err, &driverMismatchErr) {
+		t.Errorf("AttestationReport() with a 1-byte GPU VBIOS version error = %v, want a VBIOS format error, not a version mismatch", err)
+	}
+}
+
+func TestDoMeasurementsMatchReadsFirstNVDEC0Status(t *testing.T) {
+	measurementValue := make([]byte, 48)
+	testcases := []struct {
+		name     string
+		statuses []string
+		wantErr  error
+	}{
+		{
+			name:     "enabled_then_disabled_checks_msr35",
+			statuses: []string{enabledMsr35Value, disabledMsr35Value},
+			wantErr: &MismatchedMeasurementsError{[]mismatchedMeasurement{{
+				index:                   msr35Index,
+				goldenMeasurementValues: testGpuGoldenMeasurementsValues[msr35Index].Values,
+				runtimeMeasurementValue: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			}}},
+		},
+		{
+			name:     "disabled_then_enabled_skips_msr35",
+			statuses: []string{disabledMsr35Value, enabledMsr35Value},
+			wantErr:  nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			var ofds []*pb.OpaqueFieldData
+			for _, status := range tc.statuses {
+				ofds = append(ofds, &pb.OpaqueFieldData{
+					DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_NVDEC0_STATUS,
+					Data:     &pb.OpaqueFieldData_Value{Value: []byte(status)},
+				})
+			}
+			report := &pb.AttestationReport{
+				SpdmMeasurementResponse: &pb.SpdmMeasurementResponse{
+					MeasurementRecord: &pb.MeasurementRecord{
+						MeasurementBlocks: []*pb.MeasurementBlock{{
+							Index:           msr35Index + 1,
+							DmtfMeasurement: &pb.DmtfMeasurement{Value: measurementValue},
+						}},
+					},
+					OpaqueData: &pb.OpaqueData{OpaqueFieldData: ofds},
+				},
+			}
+			got := doMeasurementsMatch(report, Options{
+				AttestationType: abi.GPU,
+				goldenMeasurements: map[RimType][]rim.GoldenMeasurement{
+					Driver: {testGpuGoldenMeasurementsValues[msr35Index]},
+					VBios:  {},
+				},
+			})
+			if diff := cmp.Diff(tc.wantErr, got, cmp.AllowUnexported(MismatchedMeasurementsError{}, mismatchedMeasurement{})); diff != "" {
+				t.Errorf("doMeasurementsMatch() with NVDEC0 statuses %x error mismatch (-want +got):\n%s", tc.statuses, diff)
 			}
 		})
 	}

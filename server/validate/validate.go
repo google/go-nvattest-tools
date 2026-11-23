@@ -81,6 +81,21 @@ func runtimeMeasurements(measurementBlocks []*pb.MeasurementBlock) map[int]strin
 	return measurementsMap
 }
 
+// reportVersions returns the driver and VBIOS versions from ofds, returning an empty string for any
+// missing field. It reads the first field of each type because RIM lookup and verification use
+// abi.ExtractOpaqueValue and this function must inspect the same copy.
+func reportVersions(ofds []*pb.OpaqueFieldData, attestationType abi.AttestationType) (driverVersion, vbiosVersion string, err error) {
+	// If present, remove the trailing null byte from the driver version.
+	driverVersion = string(bytes.TrimSuffix(abi.ExtractOpaqueValue(ofds, pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION), []byte{0x00}))
+	if rawVBIOSVersion := abi.ExtractOpaqueValue(ofds, pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION); rawVBIOSVersion != nil {
+		vbiosVersion, err = utility.FormatVbiosVersion(rawVBIOSVersion, attestationType)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return driverVersion, vbiosVersion, nil
+}
+
 // AttestationReport validates runtime measurements in the attestation report against the golden measurements.
 func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts Options) error {
 	if opts.parseAttestationReport == nil {
@@ -100,20 +115,9 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	}
 
 	ofds := attestationReport.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData()
-	var driverVersion string
-	var vbiosVersion string
-
-	for _, ofd := range ofds {
-		if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_DRIVER_VERSION {
-			// If present, remove the trailing null byte from the driver version.
-			driverVersion = string(bytes.TrimSuffix(ofd.GetValue(), []byte{0x00}))
-		}
-		if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_VBIOS_VERSION {
-			vbiosVersion, err = utility.FormatVbiosVersion(ofd.GetValue(), opts.AttestationType)
-			if err != nil {
-				return err
-			}
-		}
+	driverVersion, vbiosVersion, err := reportVersions(ofds, opts.AttestationType)
+	if err != nil {
+		return err
 	}
 
 	if opts.AttestationType == abi.GPU && driverVersion != opts.DriverVersion {
@@ -169,12 +173,8 @@ func doMeasurementsMatch(attestationReport *pb.AttestationReport, opts Options) 
 	// Check if NVDEC0 status for index 35 is disabled. Only applicable for GPU attestation.
 	isMsr35Valid := true
 	if opts.AttestationType == abi.GPU {
-		for _, ofd := range attestationReport.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData() {
-			if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_NVDEC0_STATUS && string(ofd.GetValue()) == disabledMsr35Value {
-				isMsr35Valid = false
-				break
-			}
-		}
+		nvdec0Status := abi.ExtractOpaqueValue(attestationReport.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData(), pb.OpaqueDataType_OPAQUE_FIELD_ID_NVDEC0_STATUS)
+		isMsr35Valid = string(nvdec0Status) != disabledMsr35Value
 	}
 
 	var misMatchedIndices []int
