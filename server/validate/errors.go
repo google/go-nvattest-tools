@@ -75,3 +75,30 @@ type VBiosVersionMismatchError struct {
 func (e *VBiosVersionMismatchError) Error() string {
 	return fmt.Sprintf("vbios version mismatch: got %s, expected %s", strings.ToLower(e.actual), e.expected)
 }
+
+// OpaqueRecordConflictError is returned when driver and VBIOS RIMs define conflicting opaque records.
+type OpaqueRecordConflictError struct {
+	typeID uint16
+	name   string
+}
+
+func (e *OpaqueRecordConflictError) Error() string {
+	return fmt.Sprintf("conflicting opaque record in RIMs for type %d (%s)", e.typeID, e.name)
+}
+
+type mismatchedOpaqueRecord struct {
+	typeID       uint16
+	name         string
+	expectedSvn  uint64
+	runtimeValue []byte
+	reason       string
+}
+
+// MismatchedOpaqueRecordsError is returned when golden opaque records in RIM are not satisfied by runtime opaque data.
+type MismatchedOpaqueRecordsError struct {
+	mismatchedRecords []mismatchedOpaqueRecord
+}
+
+func (e *MismatchedOpaqueRecordsError) Error() string {
+	return fmt.Sprintf("mismatched opaque records: %v", e.mismatchedRecords)
+}

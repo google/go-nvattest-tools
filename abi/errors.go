@@ -70,3 +70,22 @@ type UnsupportedAttestationTypeError struct {
 func (e *UnsupportedAttestationTypeError) Error() string {
 	return fmt.Sprintf("unsupported attestation type: %v", e.AttestationType)
 }
+
+// UnsupportedOpaqueDataProfileError is returned when the NVDAOD header profile is unsupported.
+type UnsupportedOpaqueDataProfileError struct {
+	Profile uint16
+}
+
+func (e *UnsupportedOpaqueDataProfileError) Error() string {
+	return fmt.Sprintf("unsupported opaque data profile: %d", e.Profile)
+}
+
+// UnsupportedOpaqueDataVersionError is returned when the opaque data version exceeds MaxOpaqueDataVersion.
+type UnsupportedOpaqueDataVersionError struct {
+	Version uint64
+	Max     uint64
+}
+
+func (e *UnsupportedOpaqueDataVersionError) Error() string {
+	return fmt.Sprintf("opaque data version %d exceeds max supported %d", e.Version, e.Max)
+}

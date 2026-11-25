@@ -34,14 +34,8 @@ func ValidateModes(quote *pb.GpuAttestationQuote, expectedMode string) error {
 
 		// 1.1 Skip if the version is not available or is less than 1. Older opaque data versions
 		// do not contain the feature flags required to determine the attestation mode.
-		versionBytes := abi.ExtractOpaqueValue(report.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData(), pb.OpaqueDataType_OPAQUE_FIELD_ID_OPAQUE_DATA_VERSION)
-		if len(versionBytes) < 1 {
-			continue
-		}
-		versionStr := string(versionBytes)
-		parts := strings.Split(versionStr, ".")
-		major, err := strconv.Atoi(parts[0])
-		if err != nil || major < 1 {
+		major, ok := extractOpaqueDataMajorVersion(report.GetSpdmMeasurementResponse().GetOpaqueData())
+		if !ok || major < 1 {
 			continue
 		}
 
@@ -59,6 +53,32 @@ func ValidateModes(quote *pb.GpuAttestationQuote, expectedMode string) error {
 	}
 
 	return nil
+}
+
+func extractOpaqueDataMajorVersion(od *pb.OpaqueData) (int, bool) {
+	if od == nil {
+		return 0, false
+	}
+	if od.GetFormatVersion().GetHasHeader() {
+		return int(od.GetFormatVersion().GetMajor()), true
+	}
+	versionBytes := abi.ExtractOpaqueValue(od.GetOpaqueFieldData(), pb.OpaqueDataType_OPAQUE_FIELD_ID_OPAQUE_DATA_VERSION)
+	if len(versionBytes) == 0 {
+		return 0, false
+	}
+	versionStr := string(versionBytes)
+	parts := strings.Split(versionStr, ".")
+	if major, err := strconv.Atoi(parts[0]); err == nil {
+		return major, true
+	}
+	if len(versionBytes) <= abi.MaxOpaqueDataVersionSize {
+		var val uint64
+		for i := 0; i < len(versionBytes); i++ {
+			val |= uint64(versionBytes[i]) << uint(i*8)
+		}
+		return int(val), true
+	}
+	return 0, false
 }
 
 func normalizeOpaqueString(b []byte) string {

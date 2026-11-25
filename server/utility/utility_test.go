@@ -622,6 +622,28 @@ func createAttestationReport(version string, featureFlagByte byte) *pb.Attestati
 	}
 }
 
+func createNvdaodAttestationReport(major uint32, featureFlagByte byte) *pb.AttestationReport {
+	var fields []*pb.OpaqueFieldData
+	if featureFlagByte != 255 {
+		fields = append(fields, &pb.OpaqueFieldData{
+			DataType: pb.OpaqueDataType_OPAQUE_FIELD_ID_FEATURE_FLAG,
+			Data:     &pb.OpaqueFieldData_Value{Value: []byte{featureFlagByte, 0}},
+		})
+	}
+	return &pb.AttestationReport{
+		SpdmMeasurementResponse: &pb.SpdmMeasurementResponse{
+			OpaqueData: &pb.OpaqueData{
+				FormatVersion: &pb.OpaqueDataFormatVersion{
+					Major:     major,
+					Minor:     0,
+					HasHeader: true,
+				},
+				OpaqueFieldData: fields,
+			},
+		},
+	}
+}
+
 // makeQuote is a test helper to create a GpuAttestationQuote with n GPUs.
 func makeQuote(reports []*pb.AttestationReport) *pb.GpuAttestationQuote {
 	infos := make([]*pb.GpuInfo, len(reports))
@@ -711,6 +733,40 @@ func TestValidateModes(t *testing.T) {
 				createAttestationReport("1", 1),
 			},
 			parseErr:     errors.New("parsing failed"),
+			expectedMode: abi.MPTMode,
+			wantErr:      true,
+		},
+		{
+			name: "nvdaod_header_v2_all_mpt",
+			reports: []*pb.AttestationReport{
+				createNvdaodAttestationReport(2, 1), // MPT
+				createNvdaodAttestationReport(2, 1), // MPT
+			},
+			expectedMode: abi.MPTMode,
+		},
+		{
+			name: "nvdaod_header_v2_mismatch_mode",
+			reports: []*pb.AttestationReport{
+				createNvdaodAttestationReport(2, 1), // MPT
+				createNvdaodAttestationReport(2, 0), // SPT
+			},
+			expectedMode: abi.MPTMode,
+			wantErr:      true,
+		},
+		{
+			name: "binary_little_endian_version_all_mpt",
+			reports: []*pb.AttestationReport{
+				createAttestationReport("\x01\x00", 1), // MPT
+				createAttestationReport("\x01\x00", 1), // MPT
+			},
+			expectedMode: abi.MPTMode,
+		},
+		{
+			name: "binary_little_endian_version_mismatch_mode",
+			reports: []*pb.AttestationReport{
+				createAttestationReport("\x01\x00", 1), // MPT
+				createAttestationReport("\x01\x00", 0), // SPT
+			},
 			expectedMode: abi.MPTMode,
 			wantErr:      true,
 		},

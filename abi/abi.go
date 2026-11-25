@@ -427,6 +427,40 @@ var gpuOpaqueDataTypes = map[uint16]pb.OpaqueDataType{
 	255: pb.OpaqueDataType_OPAQUE_FIELD_ID_INVALID,
 }
 
+func hasNvdaodHeader(data []uint8) bool {
+	return len(data) >= NvdaodHeaderSize && string(data[:OpaqueDataHeaderMagicSize]) == OpaqueDataHeaderMagic
+}
+
+func parseOpaqueDataHeader(data []uint8) (*pb.OpaqueDataFormatVersion, int, bool, error) {
+	if !hasNvdaodHeader(data) {
+		return nil, 0, false, nil
+	}
+	profile := binary.LittleEndian.Uint16(data[NvdaodHeaderProfileOffset : NvdaodHeaderProfileOffset+OpaqueDataSizeFieldSize])
+	if profile != OpaqueDataRequiredProfile {
+		return nil, 0, false, &UnsupportedOpaqueDataProfileError{Profile: profile}
+	}
+	return &pb.OpaqueDataFormatVersion{
+		Major:     uint32(data[NvdaodHeaderMajorOffset]),
+		Minor:     uint32(data[NvdaodHeaderMinorOffset]),
+		HasHeader: true,
+	}, NvdaodHeaderSize, true, nil
+}
+
+func parseOpaqueDataVersionBytes(data []uint8) (uint64, error) {
+	if len(data) > MaxOpaqueDataVersionSize {
+		return 0, &IncorrectLengthError{
+			Context:  "opaque data version",
+			Expected: MaxOpaqueDataVersionSize,
+			Actual:   len(data),
+		}
+	}
+	var version uint64
+	for i := 0; i < len(data); i++ {
+		version |= uint64(data[i]) << uint(i*8)
+	}
+	return version, nil
+}
+
 // gpuOpaqueDataParser is a parser for GPU opaque data.
 type gpuOpaqueDataParser struct{}
 
@@ -441,20 +475,36 @@ func (g *gpuOpaqueDataParser) ParseOpaqueData(b []uint8, opaqueLength int) (*pb.
 	}
 
 	data := clone(b[:opaqueLength]) // Created an independent copy to make the interface less error-prone
-	offset := 0
-	od := &pb.OpaqueData{}
+	formatVersion, offset, hasValueType, err := parseOpaqueDataHeader(data)
+	if err != nil {
+		return nil, err
+	}
+	od := &pb.OpaqueData{
+		FormatVersion: formatVersion,
+	}
+
+	headerSize := OpaqueDataHeaderSize
+	if hasValueType {
+		headerSize = TypedOpaqueDataHeaderSize
+	}
 
 	for offset < opaqueLength {
-		if opaqueLength-offset < OpaqueDataHeaderSize {
+		if opaqueLength-offset < headerSize {
 			return nil, &IncorrectLengthError{
 				Context:  "opaque field header",
-				Expected: OpaqueDataHeaderSize,
+				Expected: headerSize,
 				Actual:   opaqueLength - offset,
 			}
 		}
 
 		rawDataType := binary.LittleEndian.Uint16(data[offset : offset+OpaqueDataTypeFieldSize])
 		offset += OpaqueDataTypeFieldSize
+
+		var valueType uint16
+		if hasValueType {
+			valueType = binary.LittleEndian.Uint16(data[offset : offset+OpaqueDataValueTypeFieldSize])
+			offset += OpaqueDataValueTypeFieldSize
+		}
 
 		dataSize := int(binary.LittleEndian.Uint16(data[offset : offset+OpaqueDataSizeFieldSize]))
 		offset += OpaqueDataSizeFieldSize
@@ -475,7 +525,9 @@ func (g *gpuOpaqueDataParser) ParseOpaqueData(b []uint8, opaqueLength int) (*pb.
 			dataType = odt
 		}
 		ofd := &pb.OpaqueFieldData{
-			DataType: dataType,
+			DataType:    dataType,
+			ValueType:   uint32(valueType),
+			RawDataType: uint32(rawDataType),
 		}
 
 		if dataType == pb.OpaqueDataType_OPAQUE_FIELD_ID_MSRSCNT {
@@ -500,6 +552,30 @@ func (g *gpuOpaqueDataParser) ParseOpaqueData(b []uint8, opaqueLength int) (*pb.
 			}
 		}
 		od.OpaqueFieldData = append(od.OpaqueFieldData, ofd)
+	}
+
+	// Resolve and validate the opaque data version.
+	// In NVDAOD format (has_header=true), the version comes from the header major field and any
+	// legacy OPAQUE_DATA_VERSION TLV entry emitted alongside the header is ignored.
+	// In legacy format (has_header=false), the version comes from the OPAQUE_DATA_VERSION TLV entry.
+	var opaqueDataVersion uint64
+	if od.GetFormatVersion().GetHasHeader() {
+		opaqueDataVersion = uint64(od.GetFormatVersion().GetMajor())
+	} else {
+		for _, ofd := range od.GetOpaqueFieldData() {
+			if ofd.GetDataType() == pb.OpaqueDataType_OPAQUE_FIELD_ID_OPAQUE_DATA_VERSION {
+				opaqueDataVersion, err = parseOpaqueDataVersionBytes(ofd.GetValue())
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if opaqueDataVersion > MaxOpaqueDataVersion {
+		return nil, &UnsupportedOpaqueDataVersionError{
+			Version: opaqueDataVersion,
+			Max:     MaxOpaqueDataVersion,
+		}
 	}
 
 	return od, nil
@@ -604,7 +680,8 @@ func (s *switchOpaqueDataParser) ParseOpaqueData(b []uint8, opaqueLength int) (*
 			dataType = odt
 		}
 		ofd := &pb.OpaqueFieldData{
-			DataType: dataType,
+			DataType:    dataType,
+			RawDataType: uint32(rawDataType),
 		}
 
 		if dataType == pb.OpaqueDataType_OPAQUE_FIELD_ID_MSRSCNT {

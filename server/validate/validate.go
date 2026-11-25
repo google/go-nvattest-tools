@@ -4,7 +4,9 @@ package validate
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -35,14 +37,15 @@ const (
 
 // Options represents the validation options for driver and vbios measurements.
 type Options struct {
-	Nonce              []byte
-	DriverVersion      string                              // DriverVersion is the driver version of the GPU device.
-	VBiosVersion       string                              // VBiosVersion is the vbios version of the GPU device, or a bios version of the switch device.
-	goldenMeasurements map[RimType][]rim.GoldenMeasurement // GoldenMeasurements is an internal field that holds the golden measurements for GPU and switch devices.
-	AttestationType    abi.AttestationType                 // AttestationType is used to parse the raw attestation report for GPU or switch devices.
-	RimClient          rim.Client                          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
-	DisableRefCheck    bool                                // If true, skip reference check.
-	GpuArch            pb.GpuArchitectureType              // GPUArch is the expected GPU architecture of the GPU device, it helps locate a specific GPU RIM ID.
+	Nonce               []byte
+	DriverVersion       string                              // DriverVersion is the driver version of the GPU device.
+	VBiosVersion        string                              // VBiosVersion is the vbios version of the GPU device, or a bios version of the switch device.
+	goldenMeasurements  map[RimType][]rim.GoldenMeasurement // GoldenMeasurements is an internal field that holds the golden measurements for GPU and switch devices.
+	goldenOpaqueRecords map[RimType][]rim.OpaqueRecord      // goldenOpaqueRecords holds RIM opaque records (such as MIN_SVN) for GPU devices.
+	AttestationType     abi.AttestationType                 // AttestationType is used to parse the raw attestation report for GPU or switch devices.
+	RimClient           rim.Client                          // RIM client to fetch RIM data, including driver+vbios for GPU, and bios for switch.
+	DisableRefCheck     bool                                // If true, skip reference check.
+	GpuArch             pb.GpuArchitectureType              // GPUArch is the expected GPU architecture of the GPU device, it helps locate a specific GPU RIM ID.
 
 	parseAttestationReport func([]byte, abi.AttestationType) (*pb.AttestationReport, error)
 	NewRimClient           func(*http.Client, string) rim.Client
@@ -71,6 +74,31 @@ func combineActiveDriverAndVBiosGoldenMeasurements(measurements map[RimType][]ri
 	}
 
 	return measurementsMap, nil
+}
+
+func combineDriverAndVBiosOpaqueRecords(records map[RimType][]rim.OpaqueRecord) ([]rim.OpaqueRecord, error) {
+	byTypeID := make(map[uint16]rim.OpaqueRecord)
+	byName := make(map[string]rim.OpaqueRecord)
+	var combined []rim.OpaqueRecord
+
+	for _, rimType := range []RimType{Driver, VBios} {
+		for _, record := range records[rimType] {
+			if _, exists := byTypeID[record.TypeID]; exists {
+				return nil, &OpaqueRecordConflictError{typeID: record.TypeID, name: record.Name}
+			}
+			if _, exists := byName[record.Name]; exists {
+				return nil, &OpaqueRecordConflictError{typeID: record.TypeID, name: record.Name}
+			}
+			byTypeID[record.TypeID] = record
+			byName[record.Name] = record
+			combined = append(combined, record)
+		}
+	}
+
+	sort.Slice(combined, func(i, j int) bool {
+		return combined[i].TypeID < combined[j].TypeID
+	})
+	return combined, nil
 }
 
 func runtimeMeasurements(measurementBlocks []*pb.MeasurementBlock) map[int]string {
@@ -133,7 +161,7 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	}
 
 	if opts.AttestationType == abi.GPU {
-		opts.goldenMeasurements, err = gpuGoldenMeasurements(ctx, attestationReport, opts)
+		opts.goldenMeasurements, opts.goldenOpaqueRecords, err = gpuGoldenData(ctx, attestationReport, opts)
 	} else {
 		opts.goldenMeasurements, err = switchGoldenMeasurements(ctx, attestationReport, opts)
 	}
@@ -142,6 +170,11 @@ func AttestationReport(ctx context.Context, rawAttestationReport []uint8, opts O
 	}
 	if err := doMeasurementsMatch(attestationReport, opts); err != nil {
 		return err
+	}
+	if opts.AttestationType == abi.GPU {
+		if err := doOpaqueRecordsMatch(attestationReport, opts); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -214,28 +247,102 @@ func doMeasurementsMatch(attestationReport *pb.AttestationReport, opts Options) 
 	return nil
 }
 
-func gpuGoldenMeasurements(ctx context.Context, attestationReport *pb.AttestationReport, opts Options) (map[RimType][]rim.GoldenMeasurement, error) {
+func doOpaqueRecordsMatch(attestationReport *pb.AttestationReport, opts Options) error {
+	goldenRecords, err := combineDriverAndVBiosOpaqueRecords(opts.goldenOpaqueRecords)
+	if err != nil {
+		return err
+	}
+	if len(goldenRecords) == 0 {
+		return nil
+	}
+
+	ofds := attestationReport.GetSpdmMeasurementResponse().GetOpaqueData().GetOpaqueFieldData()
+	var mismatched []mismatchedOpaqueRecord
+
+	for _, record := range goldenRecords {
+		ofd := abi.ExtractOpaqueFieldByRawType(ofds, record.TypeID)
+		if ofd == nil {
+			mismatched = append(mismatched, mismatchedOpaqueRecord{
+				typeID:      record.TypeID,
+				name:        record.Name,
+				expectedSvn: record.MinSVN,
+				reason:      "missing in attestation report",
+			})
+			continue
+		}
+		if ofd.GetValueType() != abi.MinSvnOpaqueValueType {
+			mismatched = append(mismatched, mismatchedOpaqueRecord{
+				typeID:       record.TypeID,
+				name:         record.Name,
+				expectedSvn:  record.MinSVN,
+				runtimeValue: ofd.GetValue(),
+				reason:       fmt.Sprintf("unexpected value type 0x%x (want 0x%x)", ofd.GetValueType(), abi.MinSvnOpaqueValueType),
+			})
+			continue
+		}
+		if len(ofd.GetValue()) != 2 {
+			mismatched = append(mismatched, mismatchedOpaqueRecord{
+				typeID:       record.TypeID,
+				name:         record.Name,
+				expectedSvn:  record.MinSVN,
+				runtimeValue: ofd.GetValue(),
+				reason:       fmt.Sprintf("unexpected value length %d (want 2)", len(ofd.GetValue())),
+			})
+			continue
+		}
+		actualSvn := uint64(binary.LittleEndian.Uint16(ofd.GetValue()))
+		if actualSvn < record.MinSVN {
+			mismatched = append(mismatched, mismatchedOpaqueRecord{
+				typeID:       record.TypeID,
+				name:         record.Name,
+				expectedSvn:  record.MinSVN,
+				runtimeValue: ofd.GetValue(),
+				reason:       fmt.Sprintf("runtime SVN %d is less than minimum SVN %d", actualSvn, record.MinSVN),
+			})
+		}
+	}
+
+	if len(mismatched) > 0 {
+		return &MismatchedOpaqueRecordsError{mismatchedRecords: mismatched}
+	}
+	return nil
+}
+
+func gpuGoldenData(ctx context.Context, attestationReport *pb.AttestationReport, opts Options) (map[RimType][]rim.GoldenMeasurement, map[RimType][]rim.OpaqueRecord, error) {
 	driverRimData, err := utility.DriverRIMData(ctx, opts.DriverVersion, attestationReport, opts.RimClient, opts.GpuArch)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	vbiosRimData, err := utility.GpuVbiosRIMData(ctx, attestationReport, opts.RimClient)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	driverGolden, err := utility.DriverGoldenMeasurements(driverRimData)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	vbiosGolden, err := utility.VbiosGoldenMeasurements(vbiosRimData)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	driverOpaqueRecords, err := driverRimData.OpaqueRecords()
+	if err != nil {
+		return nil, nil, err
+	}
+	vbiosOpaqueRecords, err := vbiosRimData.OpaqueRecords()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	return map[RimType][]rim.GoldenMeasurement{
-		Driver: driverGolden,
-		VBios:  vbiosGolden,
-	}, nil
+			Driver: driverGolden,
+			VBios:  vbiosGolden,
+		}, map[RimType][]rim.OpaqueRecord{
+			Driver: driverOpaqueRecords,
+			VBios:  vbiosOpaqueRecords,
+		}, nil
 }
 
 func switchGoldenMeasurements(ctx context.Context, attestationReport *pb.AttestationReport, opts Options) (map[RimType][]rim.GoldenMeasurement, error) {

@@ -71,11 +71,47 @@ const (
 	// OpaqueDataTypeFieldSize is the size (in bytes) of the opaque data type field in the opaque data.
 	OpaqueDataTypeFieldSize = 2
 
+	// OpaqueDataValueTypeFieldSize is the size (in bytes) of the opaque data value type field in the NVDAOD opaque data.
+	OpaqueDataValueTypeFieldSize = 2
+
 	// OpaqueDataSizeFieldSize is the size (in bytes) of the opaque data size field in the opaque data.
 	OpaqueDataSizeFieldSize = 2
 
-	// OpaqueDataHeaderSize is the size (in bytes) of the header fields in an opaque data field.
+	// OpaqueDataHeaderSize is the size (in bytes) of the header fields in a legacy opaque data field.
 	OpaqueDataHeaderSize = OpaqueDataTypeFieldSize + OpaqueDataSizeFieldSize
+
+	// TypedOpaqueDataHeaderSize is the size (in bytes) of the header fields in a typed (NVDAOD) opaque data field.
+	TypedOpaqueDataHeaderSize = OpaqueDataTypeFieldSize + OpaqueDataValueTypeFieldSize + OpaqueDataSizeFieldSize
+
+	// OpaqueDataHeaderMagic is the 6-byte magic prefix for SPDM Opaque Data v2 ("NVDAOD").
+	OpaqueDataHeaderMagic = "NVDAOD"
+
+	// OpaqueDataHeaderMagicSize is the size (in bytes) of the NVDAOD magic prefix.
+	OpaqueDataHeaderMagicSize = 6
+
+	// NvdaodHeaderSize is the size (in bytes) of the NVDAOD container header.
+	NvdaodHeaderSize = 12
+
+	// NvdaodHeaderProfileOffset is the byte offset of the uint16 profile field in the NVDAOD header.
+	NvdaodHeaderProfileOffset = 6
+
+	// NvdaodHeaderMajorOffset is the byte offset of the uint8 major version field in the NVDAOD header.
+	NvdaodHeaderMajorOffset = 8
+
+	// NvdaodHeaderMinorOffset is the byte offset of the uint8 minor version field in the NVDAOD header.
+	NvdaodHeaderMinorOffset = 9
+
+	// OpaqueDataRequiredProfile is the expected profile value in the NVDAOD header.
+	OpaqueDataRequiredProfile = 0
+
+	// MaxOpaqueDataVersionSize is the maximum size (in bytes) of the legacy opaque data version field.
+	MaxOpaqueDataVersionSize = 8
+
+	// MaxOpaqueDataVersion is the maximum supported opaque data major version.
+	MaxOpaqueDataVersion = 2
+
+	// MinSvnOpaqueValueType is the rmDataValueType for MIN_SVN opaque fields in NVDAOD format.
+	MinSvnOpaqueValueType = 0x87
 
 	// OpaquePdiDataSizeFieldSize is the size (in bytes) of the opaque switch pdis data size field in the opaque data.
 	OpaquePdiDataSizeFieldSize = 8
