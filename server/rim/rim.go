@@ -22,7 +22,6 @@ import (
 	"github.com/google/go-nvattest-tools/server/cert"
 	"github.com/lestrrat-go/libxml2"
 	"github.com/lestrrat-go/libxml2/xsd"
-	"github.com/russellhaering/goxmldsig"
 )
 
 var (
@@ -285,16 +284,9 @@ func (d *Data) verifyXMLSignatureWithRootCert(rootCertPEM []byte, now time.Time)
 		return fmt.Errorf("%w: could not parse root certificate %v", ErrRimSignatureVerificationFailed, err)
 	}
 
-	certStore := &dsig.MemoryX509CertificateStore{
-		Roots: []*x509.Certificate{parsedRootCert},
-	}
-
-	validationContext := dsig.NewDefaultValidationContext(certStore)
-	// Override the clock to use a fake clock set to the given time for verifying the signature.
-	validationContext.Clock = dsig.NewFakeClockAt(now)
 	doc := etree.NewDocument()
 	doc.SetRoot(d.root)
-	validatedElement, err := validationContext.Validate(d.root)
+	validatedElement, err := validateXMLSignature(d.root, parsedRootCert, now)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRimSignatureVerificationFailed, err)
 	}
