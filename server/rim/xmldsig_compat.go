@@ -33,14 +33,14 @@ package rim
 //     signed or digested.
 //   - Validate asks its X509CertificateStore for the trusted roots right after
 //     it has found the signature and right before it checks the certificate.
-//     forkCompatStore does the chain check at exactly that point, so the
+//     chainVerifyingStore does the chain check at exactly that point, so the
 //     order of errors is unchanged, and hands back the verified leaf as the
 //     only "root", which upstream then accepts.
 //
 // The result is byte-for-byte the behaviour (results and error strings) of
 // goxmldsig v1.6.0 with the fixes previously carried in the fork
 // github.com/atulpatildbz/goxmldsig@e806be5. selectSignature and
-// forkVerifyCertificate are adapted from goxmldsig (Apache-2.0,
+// verifyKeyInfoChain are adapted from goxmldsig (Apache-2.0,
 // Copyright (c) 2016 Russell Haering) and that fork.
 
 import (
@@ -120,7 +120,7 @@ func validateXMLSignature(root *etree.Element, rootCert *x509.Certificate, now t
 		rewriteECDSASignatureValue(sig, sigEl, rootCert)
 	}
 
-	ctx := dsig.NewDefaultValidationContext(&forkCompatStore{sig: sig, root: rootCert, now: now})
+	ctx := dsig.NewDefaultValidationContext(&chainVerifyingStore{sig: sig, root: rootCert, now: now})
 	ctx.Clock = dsig.NewFakeClockAt(now)
 	return ctx.Validate(el)
 }
@@ -255,23 +255,23 @@ func rewriteECDSASignatureValue(sig *compatSignature, sigEl *etree.Element, root
 	valueEl.SetText(base64.StdEncoding.EncodeToString(der))
 }
 
-// forkCompatStore is the X509CertificateStore given to Validate. Validate
+// chainVerifyingStore is the X509CertificateStore given to Validate. Validate
 // calls Certificates after it has found the signature and before it checks
 // the signing certificate; this is where the chain is verified.
-type forkCompatStore struct {
+type chainVerifyingStore struct {
 	sig  *compatSignature
 	root *x509.Certificate
 	now  time.Time
 }
 
 // Certificates implements dsig.X509CertificateStore.
-func (s *forkCompatStore) Certificates() ([]*x509.Certificate, error) {
+func (s *chainVerifyingStore) Certificates() ([]*x509.Certificate, error) {
 	if s.sig == nil {
 		// Unreachable: Validate only gets here after finding the same
 		// signature that selectSignature found.
 		return nil, errors.New("rim: xmldsig signature not found")
 	}
-	c, err := forkVerifyCertificate(s.sig, s.root, s.now)
+	c, err := verifyKeyInfoChain(s.sig, s.root, s.now)
 	if err != nil {
 		return nil, err
 	}
@@ -280,10 +280,10 @@ func (s *forkCompatStore) Certificates() ([]*x509.Certificate, error) {
 	return []*x509.Certificate{c}, nil
 }
 
-// forkVerifyCertificate checks the signing certificate of sig. It verifies
+// verifyKeyInfoChain checks the signing certificate of sig. It verifies
 // the KeyInfo chain (leaf first, then intermediates) up to root at now, with
 // crypto/x509 default options, and returns the leaf.
-func forkVerifyCertificate(sig *compatSignature, root *x509.Certificate, now time.Time) (*x509.Certificate, error) {
+func verifyKeyInfoChain(sig *compatSignature, root *x509.Certificate, now time.Time) (*x509.Certificate, error) {
 	if sig.KeyInfo == nil {
 		if now.Before(root.NotBefore) || now.After(root.NotAfter) {
 			return nil, errors.New("cert is not valid at this time")
