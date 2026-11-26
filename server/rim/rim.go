@@ -20,8 +20,7 @@ import (
 
 	"github.com/beevik/etree"
 	"github.com/google/go-nvattest-tools/server/cert"
-	"github.com/lestrrat-go/libxml2"
-	"github.com/lestrrat-go/libxml2/xsd"
+	"github.com/google/go-nvattest-tools/server/rim/internal/libxml2xsd"
 )
 
 var (
@@ -240,7 +239,7 @@ func (d *Data) ValidateSchema(schemaPath string) error {
 	} else {
 		schemaBytes = DefaultSchema
 	}
-	schema, err := xsd.Parse(schemaBytes)
+	schema, err := libxml2xsd.ParseSchema(schemaBytes)
 	if err != nil {
 		return fmt.Errorf("%w: could not parse schema file: %v", ErrRimSchemaValidationFailed, err)
 	}
@@ -253,7 +252,7 @@ func (d *Data) ValidateSchema(schemaPath string) error {
 		return fmt.Errorf("%w: could not write document to string: %v", ErrRimSchemaValidationFailed, err)
 	}
 
-	docToValidate, err := libxml2.ParseString(xmlString)
+	docToValidate, err := libxml2xsd.ParseString(xmlString)
 	if err != nil {
 		return fmt.Errorf("%w: could not parse document: %v", ErrRimSchemaValidationFailed, err)
 	}
