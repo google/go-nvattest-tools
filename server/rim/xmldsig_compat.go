@@ -37,9 +37,11 @@ package rim
 //     order of errors is unchanged, and hands back the verified leaf as the
 //     only "root", which upstream then accepts.
 //
-// The result is byte-for-byte the behaviour (results and error strings) of
-// goxmldsig v1.6.0 with the fixes previously carried in the fork
-// github.com/atulpatildbz/goxmldsig@e806be5. selectSignature and
+// Results and error strings match goxmldsig v1.6.0 with the fixes previously
+// carried in github.com/atulpatildbz/goxmldsig@e806be5, with one known
+// exception: if a ds:Signature sets xmlns="" under a root with a default
+// namespace, upstream follows C14N while the fork computed the wrong canonical
+// SignedInfo (NVIDIA RIMs never set xmlns=""). selectSignature and
 // verifyKeyInfoChain are adapted from goxmldsig (Apache-2.0,
 // Copyright (c) 2016 Russell Haering) and that fork.
 
@@ -72,10 +74,10 @@ const defaultIDAttr = "ID"
 // goxmldsig declares those types (some patched copies declare X509Data as
 // a pointer).
 type compatSignature struct {
-	XMLName        xml.Name            `xml:"http://www.w3.org/2000/09/xmldsig# Signature"`
-	SignedInfo     *compatSignedInfo   `xml:"SignedInfo"`
-	SignatureValue *compatSignatureVal `xml:"SignatureValue"`
-	KeyInfo        *compatKeyInfo      `xml:"KeyInfo"`
+	XMLName        xml.Name              `xml:"http://www.w3.org/2000/09/xmldsig# Signature"`
+	SignedInfo     *compatSignedInfo     `xml:"SignedInfo"`
+	SignatureValue *compatSignatureValue `xml:"SignatureValue"`
+	KeyInfo        *compatKeyInfo        `xml:"KeyInfo"`
 }
 
 type compatSignedInfo struct {
@@ -90,7 +92,7 @@ type compatSignedInfo struct {
 	} `xml:"Reference"`
 }
 
-type compatSignatureVal struct {
+type compatSignatureValue struct {
 	XMLName xml.Name `xml:"http://www.w3.org/2000/09/xmldsig# SignatureValue"`
 	Data    string   `xml:",chardata"`
 }
@@ -288,8 +290,10 @@ func (s *chainVerifyingStore) Certificates() ([]*x509.Certificate, error) {
 }
 
 // verifyKeyInfoChain checks the signing certificate of sig. It verifies
-// the KeyInfo chain (leaf first, then intermediates) up to root at now, with
-// crypto/x509 default options, and returns the leaf.
+// the KeyInfo chain (leaf first, then intermediates) up to root at now and
+// returns the leaf. It leaves KeyUsages unset on x509.VerifyOptions, so the
+// leaf needs ExtKeyUsageServerAuth or no EKU and KeyUsage is not checked,
+// matching verify.go's certificate chain check.
 func verifyKeyInfoChain(sig *compatSignature, root *x509.Certificate, now time.Time) (*x509.Certificate, error) {
 	if sig.KeyInfo == nil {
 		if now.Before(root.NotBefore) || now.After(root.NotAfter) {
@@ -323,6 +327,8 @@ func verifyKeyInfoChain(sig *compatSignature, root *x509.Certificate, now time.T
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
+	// Default x509.VerifyOptions require ExtKeyUsageServerAuth or no EKU on the
+	// leaf and do not check KeyUsage, matching verify.go's chain check.
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}); err != nil {
 		return nil, fmt.Errorf("could not verify certificate against trusted certs: %w", err)
 	}
