@@ -2,7 +2,9 @@ package libxml2xsd
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,8 +17,8 @@ const testSchema = `<?xml version="1.0"?>
   </xs:element>
 </xs:schema>`
 
-// TestErrorStrings pins the error strings that server/rim (and so the
-// regression goldens) depend on. They must stay identical to
+// TestErrorStrings pins the error strings wrapped by (*Data).ValidateSchema
+// in server/rim/rim.go. They must stay identical to
 // github.com/lestrrat-go/libxml2. The libxml2 message after "parser error : "
 // comes from the C library, so only the prefix is pinned.
 func TestErrorStrings(t *testing.T) {
@@ -65,7 +67,7 @@ func TestErrorStrings(t *testing.T) {
 func TestValidate(t *testing.T) {
 	s, err := ParseSchema([]byte(testSchema))
 	if err != nil {
-		t.Fatalf("ParseSchema() = %v", err)
+		t.Fatalf("ParseSchema(testSchema) = %v, want nil", err)
 	}
 	defer s.Free()
 
@@ -81,54 +83,183 @@ func TestValidate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := ParseString(tc.doc)
 			if err != nil {
-				t.Fatalf("ParseString() = %v", err)
+				t.Fatalf("ParseString(%q) = %v, want nil", tc.doc, err)
 			}
 			defer d.Free()
 			err = s.Validate(d)
 			if !tc.wantErr {
 				if err != nil {
-					t.Fatalf("Validate() = %v, want nil", err)
+					t.Fatalf("Validate(%q) = %v, want nil", tc.doc, err)
 				}
 				return
 			}
 			var sve SchemaValidationError
 			if !errors.As(err, &sve) || err.Error() != "schema validation failed" {
-				t.Fatalf("Validate() = %v, want SchemaValidationError", err)
+				t.Fatalf("Validate(%q) = %v, want SchemaValidationError(%q)", tc.doc, err, "schema validation failed")
 			}
 			if len(sve.Errors()) == 0 {
-				t.Error("Validate() returned no libxml2 messages")
+				t.Errorf("Validate(%q) returned 0 libxml2 messages, want >= 1", tc.doc)
 			}
 		})
 	}
 }
 
-// TestManyErrors makes libxml2 report more than the accumulator holds and a
-// message longer than its buffer: the over-long-message cases.
+// TestManyErrors makes libxml2 report more errors than the 32-entry
+// accumulator holds and at least one message longer than its 1024-byte buffer.
 func TestManyErrors(t *testing.T) {
 	s, err := ParseSchema([]byte(testSchema))
 	if err != nil {
-		t.Fatalf("ParseSchema() = %v", err)
+		t.Fatalf("ParseSchema(testSchema) = %v, want nil", err)
 	}
 	defer s.Free()
-	long := strings.Repeat("a", 4096)
-	doc := `<root id="x" ` + long + `="1">` + strings.Repeat(`<x/>`, 100) + `</root>`
-	d, err := ParseString(doc)
+
+	var doc strings.Builder
+	doc.WriteString(`<root id="x" `)
+	doc.WriteString(strings.Repeat("a", 4096))
+	doc.WriteString(`="1"`)
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&doc, ` bad%d="1"`, i)
+	}
+	doc.WriteString(`/>`)
+
+	d, err := ParseString(doc.String())
 	if err != nil {
-		t.Fatalf("ParseString() = %v", err)
+		t.Fatalf("ParseString(many-attribute doc) = %v, want nil", err)
 	}
 	defer d.Free()
+
 	var sve SchemaValidationError
 	if err := s.Validate(d); !errors.As(err, &sve) {
-		t.Fatalf("Validate() = %v, want SchemaValidationError", err)
+		t.Fatalf("Validate(many-attribute doc) = %v, want SchemaValidationError", err)
 	}
-	if n := len(sve.Errors()); n == 0 || n > 32 {
-		t.Errorf("len(Errors()) = %d, want 1..32", n)
+	if n := len(sve.Errors()); n != 32 {
+		t.Errorf("len(Errors()) = %d, want 32", n)
 	}
-	for _, e := range sve.Errors() {
-		if len(e.Error()) > 1023 {
-			t.Errorf("message length %d, want <= 1023", len(e.Error()))
+	sawTruncated := false
+	for i, e := range sve.Errors() {
+		if l := len(e.Error()); l > 1023 {
+			t.Errorf("Errors()[%d] length = %d, want <= 1023", i, l)
+		} else if l == 1023 {
+			sawTruncated = true
 		}
 	}
+	if !sawTruncated {
+		t.Error("expected at least one error message truncated to 1023 bytes, got none")
+	}
+}
+
+// TestFreeAndUseAfterFree verifies nil receivers, double Free, and Validate
+// calls after Schema.Free or Document.Free return errors instead of crashing.
+func TestFreeAndUseAfterFree(t *testing.T) {
+	t.Run("nil_receivers", func(t *testing.T) {
+		var s *Schema
+		var d *Document
+		s.Free()
+		d.Free()
+
+		var sve SchemaValidationError
+		err := s.Validate(d)
+		if !errors.As(err, &sve) {
+			t.Fatalf("(*Schema)(nil).Validate(nil) = %v, want SchemaValidationError", err)
+		}
+		if got := sve.Errors(); len(got) != 1 || got[0].Error() != "invalid schema" {
+			t.Errorf("(*Schema)(nil).Validate(nil) details = %v, want [invalid schema]", got)
+		}
+	})
+
+	t.Run("double_free_and_validate_after_schema_free", func(t *testing.T) {
+		s, err := ParseSchema([]byte(testSchema))
+		if err != nil {
+			t.Fatalf("ParseSchema(testSchema) = %v, want nil", err)
+		}
+		d, err := ParseString(`<root id="x"/>`)
+		if err != nil {
+			s.Free()
+			t.Fatalf("ParseString(<root id=\"x\"/>) = %v, want nil", err)
+		}
+		defer d.Free()
+
+		s.Free()
+		s.Free()
+
+		var sve SchemaValidationError
+		err = s.Validate(d)
+		if !errors.As(err, &sve) {
+			t.Fatalf("Validate after Schema.Free() = %v, want SchemaValidationError", err)
+		}
+		if got := sve.Errors(); len(got) != 1 || got[0].Error() != "invalid schema" {
+			t.Errorf("Validate after Schema.Free() details = %v, want [invalid schema]", got)
+		}
+	})
+
+	t.Run("double_free_and_validate_after_document_free", func(t *testing.T) {
+		s, err := ParseSchema([]byte(testSchema))
+		if err != nil {
+			t.Fatalf("ParseSchema(testSchema) = %v, want nil", err)
+		}
+		defer s.Free()
+
+		d, err := ParseString(`<root id="x"/>`)
+		if err != nil {
+			t.Fatalf("ParseString(<root id=\"x\"/>) = %v, want nil", err)
+		}
+		d.Free()
+		d.Free()
+
+		var sve SchemaValidationError
+		err = s.Validate(d)
+		if !errors.As(err, &sve) {
+			t.Fatalf("Validate after Document.Free() = %v, want SchemaValidationError", err)
+		}
+		if got := sve.Errors(); len(got) != 1 || got[0].Error() != "invalid document" {
+			t.Errorf("Validate after Document.Free() details = %v, want [invalid document]", got)
+		}
+	})
+}
+
+// TestConcurrentValidate exercises concurrent ParseSchema, ParseString,
+// Validate, and Free across goroutines.
+func TestConcurrentValidate(t *testing.T) {
+	const workers = 16
+	const iters = 25
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for g := 0; g < workers; g++ {
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				s, err := ParseSchema([]byte(testSchema))
+				if err != nil {
+					t.Errorf("worker %d iter %d: ParseSchema(testSchema) = %v, want nil", id, i, err)
+					return
+				}
+				validDoc, err := ParseString(`<root id="ok"/>`)
+				if err != nil {
+					s.Free()
+					t.Errorf("worker %d iter %d: ParseString(valid) = %v, want nil", id, i, err)
+					return
+				}
+				if err := s.Validate(validDoc); err != nil {
+					t.Errorf("worker %d iter %d: Validate(valid) = %v, want nil", id, i, err)
+				}
+				validDoc.Free()
+
+				badDoc, err := ParseString(`<root/>`)
+				if err != nil {
+					s.Free()
+					t.Errorf("worker %d iter %d: ParseString(bad) = %v, want nil", id, i, err)
+					return
+				}
+				if err := s.Validate(badDoc); err == nil {
+					t.Errorf("worker %d iter %d: Validate(bad) = nil, want error", id, i)
+				}
+				badDoc.Free()
+				s.Free()
+			}
+		}(g)
+	}
+	wg.Wait()
 }
 
 // TestRepeat runs parse, validate and free many times. Run it under
@@ -137,19 +268,20 @@ func TestRepeat(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		s, err := ParseSchema([]byte(testSchema))
 		if err != nil {
-			t.Fatalf("ParseSchema() = %v", err)
+			t.Fatalf("iter %d: ParseSchema(testSchema) = %v, want nil", i, err)
 		}
 		d, err := ParseString(`<root/>`)
 		if err != nil {
-			t.Fatalf("ParseString() = %v", err)
+			s.Free()
+			t.Fatalf("iter %d: ParseString(<root/>) = %v, want nil", i, err)
 		}
 		if err := s.Validate(d); err == nil {
-			t.Fatal("Validate() = nil, want error")
+			t.Fatalf("iter %d: Validate(<root/>) = nil, want error", i)
 		}
 		d.Free()
 		s.Free()
 		if _, err := ParseSchema([]byte("<root/>")); err == nil {
-			t.Fatal("ParseSchema(<root/>) = nil error")
+			t.Fatalf("iter %d: ParseSchema(<root/>) = nil, want error", i)
 		}
 	}
 }
