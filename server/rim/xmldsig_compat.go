@@ -118,6 +118,13 @@ func validateXMLSignature(root *etree.Element, rootCert *x509.Certificate, now t
 	sig, sigEl := selectSignature(el)
 	if sig != nil {
 		rewriteECDSASignatureValue(sig, sigEl, rootCert)
+		// When KeyInfo is present, crypto/x509 treats a zero CurrentTime as
+		// time.Now() during chain verification, whereas upstream's clock check
+		// uses year 1. Normalize once so both checks use the same time,
+		// matching the fork (which still rejects zero now when KeyInfo is absent).
+		if now.IsZero() && sig.KeyInfo != nil {
+			now = time.Now()
+		}
 	}
 
 	ctx := dsig.NewDefaultValidationContext(&chainVerifyingStore{sig: sig, root: rootCert, now: now})

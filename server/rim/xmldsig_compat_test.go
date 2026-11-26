@@ -224,6 +224,72 @@ func TestXMLSignatureCompat_CertificateChain(t *testing.T) {
 	}
 }
 
+func TestXMLSignatureCompat_ZeroNow(t *testing.T) {
+	realNow := time.Now()
+	validNow := func(c *x509.Certificate) {
+		c.NotBefore = realNow.Add(-24 * time.Hour)
+		c.NotAfter = realNow.Add(24 * time.Hour)
+	}
+	root := newCompatCert(t, "root", true, nil, validNow)
+	intermediate := newCompatCert(t, "intermediate", true, root, validNow)
+	leaf := newCompatCert(t, "leaf", false, intermediate, validNow)
+	expiredLeaf := newCompatCert(t, "expired-leaf", false, intermediate, func(c *x509.Certificate) {
+		c.NotBefore = realNow.Add(-48 * time.Hour)
+		c.NotAfter = realNow.Add(-24 * time.Hour)
+	})
+
+	noKeyInfo := signCompat(t, root.key, []*x509.Certificate{root.cert}, true)
+	if ki := noKeyInfo.FindElement(".//KeyInfo"); ki != nil {
+		ki.Parent().RemoveChild(ki)
+	}
+
+	tests := []struct {
+		name          string
+		el            *etree.Element
+		wantErr       string
+		wantErrPrefix string
+	}{
+		{
+			name: "keyinfo_chain",
+			el:   signCompat(t, leaf.key, []*x509.Certificate{leaf.cert, intermediate.cert}, true),
+		},
+		{
+			name: "keyinfo_root_signed",
+			el:   signCompat(t, root.key, []*x509.Certificate{root.cert}, true),
+		},
+		{
+			name:          "keyinfo_expired",
+			el:            signCompat(t, expiredLeaf.key, []*x509.Certificate{expiredLeaf.cert, intermediate.cert}, true),
+			wantErrPrefix: "could not verify certificate against trusted certs: x509: certificate has expired or is not yet valid",
+		},
+		{
+			name:    "no_keyinfo",
+			el:      noKeyInfo,
+			wantErr: "cert is not valid at this time",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validateXMLSignature(tc.el, root.cert, time.Time{})
+			switch {
+			case tc.wantErr != "":
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("validateXMLSignature(zero now) = %v, want %q", err, tc.wantErr)
+				}
+			case tc.wantErrPrefix != "":
+				if err == nil || !strings.HasPrefix(err.Error(), tc.wantErrPrefix) {
+					t.Fatalf("validateXMLSignature(zero now) = %v, want prefix %q", err, tc.wantErrPrefix)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("validateXMLSignature(zero now) = %v, want nil", err)
+				}
+			}
+		})
+	}
+}
+
 func elString(t *testing.T, el *etree.Element) string {
 	t.Helper()
 	d := etree.NewDocument()
