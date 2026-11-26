@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
+	etree "github.com/beevik/etree"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	etree "github.com/beevik/etree"
-	testdata "github.com/google/go-nvattest-tools/testing/testdata"
+	"github.com/google/go-nvattest-tools/server/cert"
 	testHelper "github.com/google/go-nvattest-tools/testing"
+	testdata "github.com/google/go-nvattest-tools/testing/testdata"
 )
 
 const hashFunctionNamespaceURI = "http://www.w3.org/2001/04/xmlenc#sha384"
@@ -736,7 +737,6 @@ func TestValidateSchema(t *testing.T) {
 }
 
 func TestVerifyXMLSignature(t *testing.T) {
-	wrongRootCertPEM := []byte(`-----BEGIN CERTIFICATE-----...-----END CERTIFICATE-----`)
 	badFormatPEM := []byte("this is not a valid pem block")
 	block := &pem.Block{
 		Type:  "CERTIFICATE",
@@ -755,7 +755,7 @@ func TestVerifyXMLSignature(t *testing.T) {
 		wantErrMsg string
 	}{
 		{
-			name: "success_valid_signature",
+			name:     "success_valid_signature",
 			rootCert: testdata.TestValidRootCert,
 			getRoot: func(t *testing.T) *etree.Element {
 				return testHelper.ParseXML(t, "rim/valid_signed_xml.xml")
@@ -782,20 +782,23 @@ func TestVerifyXMLSignature(t *testing.T) {
 		},
 		{
 			name:     "failure_wrong_root_certificate",
-			rootCert: wrongRootCertPEM,
+			rootCert: cert.RimRootCertPEM,
 			getRoot: func(t *testing.T) *etree.Element {
 				return testHelper.ParseXML(t, "rim/valid_signed_xml.xml")
 			},
-			wantErr: ErrRimSignatureVerificationFailed,
+			wantErr:    ErrRimSignatureVerificationFailed,
+			wantErrMsg: "certificate signed by unknown authority",
 		},
 		{
-			name: "failure_tampered_xml_invalid_signature",
+			name:     "failure_tampered_xml_invalid_signature",
+			rootCert: testdata.TestValidRootCert,
 			getRoot: func(t *testing.T) *etree.Element {
 				root := testHelper.ParseXML(t, "rim/valid_signed_xml.xml")
-				root.RemoveAttr("tagId")
+				root.CreateAttr("Destination", "https://evil.example/")
 				return root
 			},
-			wantErr: ErrRimSignatureVerificationFailed,
+			wantErr:    ErrRimSignatureVerificationFailed,
+			wantErrMsg: "Signature could not be verified",
 		},
 	}
 	for _, tc := range testCases {

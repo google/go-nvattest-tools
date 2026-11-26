@@ -20,9 +20,7 @@ import (
 
 	"github.com/beevik/etree"
 	"github.com/google/go-nvattest-tools/server/cert"
-	"github.com/lestrrat-go/libxml2"
-	"github.com/lestrrat-go/libxml2/xsd"
-	"github.com/russellhaering/goxmldsig"
+	"github.com/google/go-nvattest-tools/server/rim/internal/libxml2xsd"
 )
 
 var (
@@ -241,7 +239,7 @@ func (d *Data) ValidateSchema(schemaPath string) error {
 	} else {
 		schemaBytes = DefaultSchema
 	}
-	schema, err := xsd.Parse(schemaBytes)
+	schema, err := libxml2xsd.ParseSchema(schemaBytes)
 	if err != nil {
 		return fmt.Errorf("%w: could not parse schema file: %v", ErrRimSchemaValidationFailed, err)
 	}
@@ -254,7 +252,7 @@ func (d *Data) ValidateSchema(schemaPath string) error {
 		return fmt.Errorf("%w: could not write document to string: %v", ErrRimSchemaValidationFailed, err)
 	}
 
-	docToValidate, err := libxml2.ParseString(xmlString)
+	docToValidate, err := libxml2xsd.ParseString(xmlString)
 	if err != nil {
 		return fmt.Errorf("%w: could not parse document: %v", ErrRimSchemaValidationFailed, err)
 	}
@@ -285,16 +283,9 @@ func (d *Data) verifyXMLSignatureWithRootCert(rootCertPEM []byte, now time.Time)
 		return fmt.Errorf("%w: could not parse root certificate %v", ErrRimSignatureVerificationFailed, err)
 	}
 
-	certStore := &dsig.MemoryX509CertificateStore{
-		Roots: []*x509.Certificate{parsedRootCert},
-	}
-
-	validationContext := dsig.NewDefaultValidationContext(certStore)
-	// Override the clock to use a fake clock set to the given time for verifying the signature.
-	validationContext.Clock = dsig.NewFakeClockAt(now)
 	doc := etree.NewDocument()
 	doc.SetRoot(d.root)
-	validatedElement, err := validationContext.Validate(d.root)
+	validatedElement, err := validateXMLSignature(d.root, parsedRootCert, now)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRimSignatureVerificationFailed, err)
 	}
