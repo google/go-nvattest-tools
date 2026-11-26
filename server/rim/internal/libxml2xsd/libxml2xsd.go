@@ -16,9 +16,8 @@
 // error string:
 //   - It does not call xmlParseInNodeContext, whose prototype changed in
 //     libxml2 2.14 and breaks the upstream build against newer libxml2.
-//   - The error accumulator does not read past the end of a message buffer,
-//     checks for NULL, and frees each warning (upstream freed each error
-//     twice instead).
+//   - The error accumulator does not read past its 1024-byte message buffer,
+//     always NUL-terminates copied messages, and checks for NULL.
 //   - The schema parser context and the parsed schema document are freed.
 //     Upstream leaked both on every Parse call.
 package libxml2xsd
@@ -42,9 +41,7 @@ static inline xmlError* MY_xmlCtxtLastError(void *ctx) {
 #define GO_LIBXML2_ERRWARN_ACCUMULATOR_SIZE 32
 typedef struct go_libxml2_errwarn_accumulator {
 	char *errors[GO_LIBXML2_ERRWARN_ACCUMULATOR_SIZE];
-	char *warnings[GO_LIBXML2_ERRWARN_ACCUMULATOR_SIZE];
 	int erridx;
-	int warnidx;
 } go_libxml2_errwarn_accumulator;
 
 static
@@ -58,10 +55,8 @@ MY_createErrWarnAccumulator() {
 	}
 	for (i = 0; i < GO_LIBXML2_ERRWARN_ACCUMULATOR_SIZE; i++) {
 		ctx->errors[i] = NULL;
-		ctx->warnings[i] = NULL;
 	}
 	ctx->erridx = 0;
-	ctx->warnidx = 0;
 	return ctx;
 }
 
@@ -75,9 +70,6 @@ MY_freeErrWarnAccumulator(go_libxml2_errwarn_accumulator* ctx) {
 	for (i = 0; i < GO_LIBXML2_ERRWARN_ACCUMULATOR_SIZE; i++) {
 		if (ctx->errors[i] != NULL) {
 			free(ctx->errors[i]);
-		}
-		if (ctx->warnings[i] != NULL) {
-			free(ctx->warnings[i]);
 		}
 	}
 	free(ctx);
@@ -204,16 +196,16 @@ func parseSchema(buf []byte) (*Schema, error) {
 	// behavior: callers have never seen an error for this case.
 	cbuf := (*C.char)(unsafe.Pointer(&buf[0]))
 
-	docctx := C.xmlCreateMemoryParserCtxt(cbuf, C.int(len(buf)))
-	if docctx == nil {
+	docCtx := C.xmlCreateMemoryParserCtxt(cbuf, C.int(len(buf)))
+	if docCtx == nil {
 		return nil, errors.New("error creating doc parser")
 	}
-	// The parsed document does not depend on docctx.
-	defer C.xmlFreeParserCtxt(docctx)
+	// The parsed document does not depend on docCtx.
+	defer C.xmlFreeParserCtxt(docCtx)
 
-	doc := C.xmlCtxtReadMemory(docctx, cbuf, C.int(len(buf)), nil, nil, 0)
+	doc := C.xmlCtxtReadMemory(docCtx, cbuf, C.int(len(buf)), nil, nil, 0)
 	if doc == nil {
-		return nil, fmt.Errorf("failed to read schema from memory: %v", xmlCtxtLastError(docctx))
+		return nil, fmt.Errorf("failed to read schema from memory: %v", xmlCtxtLastError(docCtx))
 	}
 
 	parserCtx := C.xmlSchemaNewDocParserCtxt(doc)
